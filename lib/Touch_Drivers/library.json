@@ -1,0 +1,7 @@
+{
+  "name": "Touch_Drivers",
+  "version": "1.0.0",
+  "description": "FT6336U touch controller driver",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

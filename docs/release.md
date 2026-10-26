@@ -89,24 +89,7 @@ git push origin v0.2.0
 
 ---
 
-## 6. 转为公开仓库时
-
-当前仓库建议保持**私有**，完成 AI 开发就绪改造后再公开。
-
-公开前检查：
-
-- [ ] Gitee 仓库许可证标识设为 **GPL-3.0**
-- [ ] 开启 Issue / PR / Fork（按社区策略）
-- [ ] 保护 `main`：禁止 force push，要求 PR
-- [ ] 复查历史中是否含密钥、个人信息、构建产物、`dist/`
-- [ ] CI：`.github/workflows/validate.yml` 已就绪；镜像到 GitHub 后会自动跑
-      `validate.py --static --host`（Gitee 侧可另行配置 Gitee Go）
-- [ ] README 首屏写清“这是什么 / 怎么开始 / 给 Agent 的提示词”
-- [ ] 明确射频与合规责任（`docs/hardware/射频与合规.md`）
-
----
-
-## 7. 不做的发布方式
+## 6. 不做的发布方式
 
 - **OTA**：分区表没有 `app1`，需要重新设计分区与回滚策略；不要在补丁版本里偷偷加。
 - **Web 刷机页**：可后续加，读取本地 `full.bin`，不经过服务器。

@@ -33,7 +33,7 @@
 | [`build-and-flash.md`](build-and-flash.md) | 权威 | 装环境、构建、合并 0x0 固件、烧录、恢复 |
 | [`testing.md`](testing.md) | 权威 | 静态检查、主机测试、设备测试清单、报告格式 |
 | [`fonts.md`](fonts.md) | 权威 | 中文字库、子集生成、覆盖检查 |
-| [`release.md`](release.md) | 权威 | 版本、产物、发布检查、转公开清单 |
+| [`release.md`](release.md) | 权威 | 版本、产物、发布检查 |
 | [`troubleshooting.md`](troubleshooting.md) | 参考 | 启动循环、花屏、I2C 卡死、射频异常 |
 
 ## 硬件

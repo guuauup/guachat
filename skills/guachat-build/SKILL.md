@@ -13,35 +13,44 @@ description: Build GUACHAT firmware, check memory budgets, and produce a 0x0 mer
 
 ## Steps
 
-1. Build the development environment:
+1. Run the complete gate before delivery:
+   ```bash
+   python tools/validate.py --all
+   ```
+   It runs static checks, host tests, the build, the 0x0 merge, and verifies
+   `full.bin` against `manifest.json` (size, SHA256, matching ELF).
+2. For a build-only check:
    ```bash
    pio run -e guachat_dev
    ```
    `main` has only this one environment; build only the application you are
    developing.
-2. Read the size report:
+3. Read the size report:
    - `RAM` and `Flash` lines
    - `drom0_0_seg` line
    - the dev baseline is small, but fonts and constant tables grow DROM quickly.
-3. Run validation:
-   ```bash
-   python tools/validate.py --static
-   python tools/validate.py --host
-   ```
-4. Merge:
-   ```bash
-   python tools/merge_firmware.py
-   ```
-   This runs the build again unless `--no-build` is given.
-5. Verify:
+4. Inspect the artifacts:
    ```bash
    cat build/guachat-dev-full.bin.sha256
+   cat build/guachat-dev-full.manifest.json
    ```
-6. Report:
-   - Build status
+   The manifest binds the merged image, application, bootloader, partitions,
+   ELF, and MAP with their SHA256.
+5. Report:
+   - Build status (`PASS / FAIL / NOT RUN`)
    - memory percentages
-   - artifact path, size, SHA256
+   - artifact path, size, SHA256, manifest path
    - warnings (RF/wireless notices are not failures)
+
+## Manual merge
+
+If you only need to re-merge an existing build:
+
+```bash
+python tools/merge_firmware.py --no-build
+```
+
+Without `--no-build`, the tool builds first and then merges.
 
 ## Hard rules
 
@@ -55,6 +64,7 @@ description: Build GUACHAT firmware, check memory budgets, and produce a 0x0 mer
 ```text
 build/guachat-dev-full.bin
 build/guachat-dev-full.bin.sha256
+build/guachat-dev-full.manifest.json
 ```
 
 ## Fallbacks

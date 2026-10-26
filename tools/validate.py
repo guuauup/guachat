@@ -15,6 +15,8 @@ their own hardware and are responsible for compliance.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -57,6 +59,14 @@ class Report:
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 # ---------------------------------------------------------------- static checks
@@ -409,12 +419,12 @@ def host_checks() -> int:
 # ---------------------------------------------------------------- firmware
 
 def firmware_checks(env: str) -> int:
-    print("== firmware merge ==")
+    print("== firmware build + merge ==")
     merge = TOOLS / "merge_firmware.py"
     if not merge.exists():
         print("[FAIL] tools/merge_firmware.py is missing")
         return 1
-    cmd = [sys.executable, str(merge), "--env", env, "--no-build"]
+    cmd = [sys.executable, str(merge), "--env", env]
     print("$ " + " ".join(cmd))
     proc = subprocess.run(cmd, cwd=ROOT)
     if proc.returncode != 0:
@@ -423,10 +433,36 @@ def firmware_checks(env: str) -> int:
     name = "guachat-dev-full.bin" if env == "guachat_dev" else f"{env}-full.bin"
     image = ROOT / "build" / name
     checksum = image.with_suffix(image.suffix + ".sha256")
-    if not image.exists() or not checksum.exists():
-        print(f"[FAIL] expected artifacts missing: {image}, {checksum}")
+    manifest = image.with_suffix(".manifest.json")
+    if not image.exists() or not checksum.exists() or not manifest.exists():
+        print(
+            "[FAIL] expected artifacts missing: "
+            f"{image}, {checksum}, {manifest}"
+        )
         return 1
+
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[FAIL] manifest is unreadable: {manifest} ({exc})")
+        return 1
+
+    merged = data.get("merged_image") or {}
+    if merged.get("sha256") != sha256_file(image):
+        print(f"[FAIL] manifest SHA256 does not match {image}")
+        return 1
+    if merged.get("size") != image.stat().st_size:
+        print(f"[FAIL] manifest size does not match {image}")
+        return 1
+
+    elf = (data.get("artifacts") or {}).get("elf")
+    if not elf or not elf.get("sha256"):
+        print("[FAIL] manifest has no ELF; crash symbolization is unavailable")
+        return 1
+
     print(f"[OK]   merged image: {image} ({image.stat().st_size} bytes)")
+    print(f"[OK]   manifest: {manifest}")
+    print(f"[OK]   matching ELF: {elf.get('path')}")
     return 0
 
 

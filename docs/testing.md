@@ -6,6 +6,23 @@
 
 ---
 
+## 0. 完整门禁（交付前）
+
+```bash
+python tools/validate.py --all
+```
+
+依次执行静态检查、主机测试、构建、合并 `0x0` 镜像，并校验：
+
+- `build/guachat-dev-full.bin` 的大小与 SHA256；
+- `build/guachat-dev-full.manifest.json` 中的 merged image、ELF、MAP 身份；
+- manifest 里的 SHA256 与实际文件一致。
+
+`--firmware` 也会先构建再合并；只有明确要复用现有构建时，才直接调用
+`python tools/merge_firmware.py --no-build`。
+
+---
+
 ## 1. 静态检查
 
 ### 1.1 构建
@@ -117,14 +134,13 @@ python -m unittest discover -s tools/host_tests -p "test_*.py" -v
 ## 4. 报告格式
 
 ```text
-Build:
-  pio run -e guachat_dev: SUCCESS
+Build:        PASS
   RAM 8.2% / Flash 11.7% / DROM 21.30%
 
-Host tests:
+Host tests:   PASS
   tools/host_tests: 9 passed
 
-Device tests:
+Device tests: PASS
   启动：通过，无重启循环
   显示/触摸：通过
   电源：4.05 V / 78% / -120 mA
@@ -140,12 +156,15 @@ Unverified:
 
 Artifacts:
   build/guachat-dev-full.bin
+  build/guachat-dev-full.manifest.json
   size 738288 bytes
   sha256 ...
 ```
 
 ### 4.1 写作规则
 
+- 状态只写 `PASS / FAIL / NOT RUN`；没跑就是 `NOT RUN`，不能写“应该没问题”。
+- 编译通过只能写 `Build: PASS`，不能升级成 `Device tests: PASS`。
 - 没有实测的项，不要写“正常”。
 - 失败项要写现象、日志关键行、初步判断。
 - 改动过射频/分区/启动配置时，单列“风险”段落。
@@ -155,10 +174,11 @@ Artifacts:
 
 ## 5. 什么时候可以判定“完成”
 
-- [ ] `pio run -e guachat_dev` 成功
+- [ ] `python tools/validate.py --all` 通过（静态 + 主机 + 构建 + 合并 + 产物校验）
 - [ ] 静态检查通过（警告需解释）
 - [ ] 设备测试清单中与需求相关的项全部实测
 - [ ] 未验证项明确列出原因
+- [ ] `build/guachat-dev-full.manifest.json` 已生成，merged image 与 ELF 身份匹配
 - [ ] 合并固件已生成并校验 SHA256（若任务要求交付固件）
 - [ ] 未混入应用业务代码或第二个 `setup()`
 - [ ] 未擅自烧录（烧录已获授权）

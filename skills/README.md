@@ -3,6 +3,10 @@
 本目录是给编码 Agent 的技能包。每个 Skill 是一个带 frontmatter 的
 `SKILL.md` + 中文版 `SKILL.zh_CN.md`，描述**触发条件**和工作流。
 
+> 下面 5 个 `guachat-*` 技能是开发前必需项。Agent 必须先确认当前环境能
+> 发现并读取它们；缺失时自行安装，安装失败要报告阻塞点，不能凭“目录存在”
+> 宣称已加载。详见 [`AGENTS.md`](../AGENTS.md#11-必需技能开发前检查)。
+
 | Skill | 用途 |
 | --- | --- |
 | [`guachat-develop/`](guachat-develop/) | 需求 → 分支 → 实现 → 验证 → 报告 |

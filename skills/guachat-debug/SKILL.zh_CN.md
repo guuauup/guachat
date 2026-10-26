@@ -23,6 +23,20 @@ description: 诊断 GUACHAT 启动循环、panic、花屏、I2C/SD 故障与射�
    - 最后一条 `[BSP] ...`
    - 是否到 `[BSP] hardware init done`
 
+## 解码地址前先匹配 ELF
+
+1. 读 `build/guachat-dev-full.manifest.json`，确认当前刷入镜像的 SHA256 与
+   `merged_image.sha256` 一致。
+2. 只有当 `.pio/build/guachat_dev/firmware.elf` 的 SHA256 等于
+   `artifacts.elf.sha256` 时，才能用它解码。
+3. 用匹配的 ELF 执行：
+   ```bash
+   ~/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-addr2line \
+     -pfiaC -e .pio/build/guachat_dev/firmware.elf <地址>
+   ```
+4. 没有匹配 ELF 时，只报告日志本身能证明的结论，并把缺失产物写进
+   `Unverified`；不要重新编译当前源码后冒充旧固件。
+
 ## 判断表
 
 | 现象 | 可能原因 | 处理 |

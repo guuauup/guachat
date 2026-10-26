@@ -37,16 +37,20 @@ description: 使用 BSP 为 GUACHAT 2G4 开发新应用或界面。用户提出�
    - 后台工作放独立任务，通过队列/快照交给 UI。
    - 界面用纯 LVGL 自建，不要复制外部生成器代码。
 5. **构建与验证。**
+   快速迭代：
    ```bash
    pio run -e guachat_dev
    python tools/validate.py --static
    ```
-6. **需要交付固件时合并。**
+   交付前跑完整门禁：
    ```bash
-   python tools/merge_firmware.py
+   python tools/validate.py --all
    ```
-7. **报告**：`Build / Host tests / Device tests / Unverified / Artifacts`。
-8. **烧录前先问。** 编译成功或插着 USB 都不等于授权。
+   它会执行静态检查、主机测试、构建、0x0 合并，并核对 `full.bin` 与
+   `manifest.json` 中的 SHA256/ELF 身份。
+6. **报告**：`Build / Host tests / Device tests / Unverified / Artifacts`。
+   状态用 `PASS / FAIL / NOT RUN`；编译成功只能写 `Build: PASS`。
+7. **烧录前先问。** 编译成功或插着 USB 都不等于授权。
 
 ## 硬性规则
 

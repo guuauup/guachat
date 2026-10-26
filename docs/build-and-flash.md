@@ -106,7 +106,12 @@ python tools/merge_firmware.py --zip          # 同时生成恢复包
 ```text
 build/guachat-dev-full.bin
 build/guachat-dev-full.bin.sha256
+build/guachat-dev-full.manifest.json
 ```
+
+`manifest.json` 把 merged image、application、bootloader、partitions、
+boot_app0、ELF、MAP 的路径、大小与 SHA256 绑在一起。刷机和崩溃符号匹配时，
+以 manifest 里的 merged image / ELF 身份为准。
 
 工具会保留 bootloader 头里的 flash mode，不会强制 QIO。
 
@@ -137,6 +142,13 @@ $PY $ESPTOOL --chip esp32s3 merge_bin \
 ```bash
 sha256sum build/guachat-dev-full.bin
 cat build/guachat-dev-full.bin.sha256
+cat build/guachat-dev-full.manifest.json
+```
+
+完整门禁会再次核对 manifest 中的 SHA256 与 ELF 身份：
+
+```bash
+python tools/validate.py --all
 ```
 
 ---

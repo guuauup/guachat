@@ -34,6 +34,27 @@ GPS、IMU/磁力计/气压/温湿度/RTC、TF 卡、I2S 麦克风与功放、电
 
 不要在没读文档的情况下猜硬件、猜 API、猜引脚。
 
+### 1.1 必需技能（开发前检查）
+
+本仓库的 Agent 工作流依赖 5 个技能包：
+
+`guachat-setup`、`guachat-develop`、`guachat-build`、`guachat-device-test`、`guachat-debug`。
+
+开始开发前必须确认当前 Agent 能发现并读取这些技能；缺失时自行安装：
+
+```bash
+python tools/install_skills.py
+python tools/install_skills.py --print
+```
+
+其他 Agent 若不支持 `.claude/skills`，把 `skills/<name>/` 复制到它支持的位置，
+或直接读 `SKILL.md`。
+
+- 不要只因为目录存在就宣称技能已加载；必须确认当前环境实际可用。
+- 安装失败、权限不足或平台不支持时，报告阻塞点和需要用户执行的最小动作。
+- 不需要每个任务都调用全部技能；按任务选择匹配的技能。
+- 安装/加载技能不代表获得烧录、commit、push 授权。
+
 ---
 
 ## 2. 硬性规则（违反即返工）
@@ -90,7 +111,9 @@ GPS、IMU/磁力计/气压/温湿度/RTC、TF 卡、I2S 麦克风与功放、电
 ### 2.6 构建、验证、烧录
 
 - 默认构建环境：`pio run -e guachat_dev`。
-- 交付前必须跑项目验证（见 [`docs/testing.md`](docs/testing.md)）。
+- 交付前必须跑完整门禁：`python tools/validate.py --all`。
+  它依次执行静态检查、主机测试、构建、合并 `0x0` 镜像，并校验 `full.bin` 与
+  `manifest.json` 中的 SHA256/ELF 身份。迭代时可用 `--static` / `--host` 缩短时间。
 - **未经用户明确确认，不得烧录**。编译成功、插着 USB、用户说过“可以测试”都不等于授权。
 - 烧录前先问；烧录后报告串口日志与设备现象。
 - 合并 0x0 固件时**不要强制 `--flash_mode qio`**：PlatformIO 生成的 bootloader 头是 DIO，
@@ -143,9 +166,10 @@ BSP 会以 `mag_ok=false` 降级，这不一定是驱动 bug；先确认硬件�
    - 先保证 BSP 初始化与屏幕/触摸可用；
    - UI 用纯 LVGL 重新设计，不复用示例布局；
    - 中文界面必须检查字库覆盖（见 [`docs/fonts.md`](docs/fonts.md)）。
-5. 编译并修复所有警告/错误：`pio run -e guachat_dev`。
-6. 跑验证脚本：`python tools/validate.py --static`。
-7. 生成可交付的 0x0 合并固件（若任务要求）：`python tools/merge_firmware.py`。
+5. 迭代时编译并修复所有警告/错误：`pio run -e guachat_dev`。
+6. 交付前跑完整门禁：`python tools/validate.py --all`
+   （静态 + 主机 + 构建 + 合并 + manifest/SHA256/ELF 校验）。
+7. 完整门禁已包含合并；只需单独合并时：`python tools/merge_firmware.py`。
 8. 询问用户是否上机；确认后才烧录并采集串口日志。
 9. 按第 6 节格式报告。
 
@@ -168,14 +192,15 @@ BSP 会以 `mag_ok=false` 降级，这不一定是驱动 bug；先确认硬件�
 最终回复必须把结果分开写，不允许只说“已完成”：
 
 ```text
-Build:        pio run -e guachat_dev 的结果（成功/失败、RAM/Flash 占用）
-Host tests:   跑了哪些、结果如何；没有就跑不了要说明
-Device tests: 真机上实际验证了什么（屏幕、触摸、传感器读数、收发……）
+Build:        PASS / FAIL / NOT RUN（附 RAM/Flash 占用）
+Host tests:   PASS / FAIL / NOT RUN（跑了哪些、结果如何）
+Device tests: PASS / FAIL / NOT RUN（真机实际验证了什么）
 Unverified:   没有条件验证的项，写清原因（例如没有第二台 LoRa 设备）
-Artifacts:    合并固件路径、大小、SHA256（若生成）
+Artifacts:    合并固件路径、大小、SHA256、manifest.json（若生成）
 ```
 
-- 设备测试不由脚本判定 PASS；由执行者按清单记录。
+- 没跑就是 `NOT RUN`，不能写“应该没问题”；编译通过只能写 `Build: PASS`。
+- 设备测试不由脚本判定 PASS；由执行者按清单记录实际读数。
 - 不要把“编译通过”写成“功能正常”。
 - 改动射频、分区表、引导配置、WiFi/蓝牙时，必须在报告中单列风险。
 
@@ -222,10 +247,10 @@ pio run -e guachat_dev -t upload        # 先获得用户确认
 pio device monitor -b 115200
 
 # 验证
-python tools/validate.py --static
-python tools/validate.py --all
+python tools/validate.py --static   # 快速迭代
+python tools/validate.py --all      # 完整门禁：静态+主机+构建+合并+产物校验
 
-# 合并为可从 0x0 刷写的镜像
+# 单独合并为可从 0x0 刷写的镜像（完整门禁已包含）
 python tools/merge_firmware.py --zip
 
 # Claude Code 技能包（装到 .claude/skills）

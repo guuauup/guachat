@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import subprocess
 import sys
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -96,7 +98,94 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def make_zip(image: Path, checksum: Path, env: str) -> Path:
+def git_state() -> dict[str, object]:
+    def git(*args: str) -> str:
+        try:
+            proc = subprocess.run(
+                ["git", *args],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return ""
+        return proc.stdout.strip() if proc.returncode == 0 else ""
+
+    return {
+        "commit": git("rev-parse", "HEAD") or None,
+        "dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
+    }
+
+
+def display_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def artifact(path: Path, role: str) -> dict[str, object]:
+    return {
+        "role": role,
+        "path": display_path(path),
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+    }
+
+
+def optional_artifact(path: Path, role: str) -> dict[str, object] | None:
+    return artifact(path, role) if path.exists() else None
+
+
+def write_manifest(
+    output: Path,
+    checksum: Path,
+    env: str,
+    files: dict[str, Path],
+) -> Path:
+    env_build = ROOT / ".pio" / "build" / env
+    manifest = {
+        "schema": 1,
+        "generated_at": datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z"),
+        "environment": env,
+        "git": git_state(),
+        "flash": {
+            "chip": "esp32s3",
+            "size_bytes": FLASH_SIZE,
+            "freq": "80m",
+            "mode": "unchanged (bootloader DIO)",
+        },
+        "offsets": {key: hex(value) for key, value in OFFSETS.items()},
+        "merged_image": {
+            **artifact(output, "merged"),
+            "checksum_path": display_path(checksum),
+        },
+        "artifacts": {
+            "application": artifact(files["firmware"], "application"),
+            "bootloader": artifact(files["bootloader"], "bootloader"),
+            "partitions": artifact(files["partitions"], "partitions"),
+            "boot_app0": artifact(files["boot_app0"], "boot_app0"),
+            "elf": optional_artifact(env_build / "firmware.elf", "elf"),
+            "map": optional_artifact(env_build / "firmware.map", "map"),
+        },
+    }
+    path = output.with_suffix(".manifest.json")
+    path.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def make_zip(
+    image: Path,
+    checksum: Path,
+    manifest: Path,
+    env: str,
+) -> Path:
     restore = BUILD_DIR / f"{image.stem}-restore.zip"
     readme = (
         f"GUACHAT AI firmware restore package\n"
@@ -105,11 +194,13 @@ def make_zip(image: Path, checksum: Path, env: str) -> Path:
         f"SHA256: {checksum.read_text(encoding='utf-8').split()[0]}\n\n"
         "Flash from offset 0x0:\n"
         f"  python tools/flash.py {image.name}\n\n"
+        "Artifacts and hashes are recorded in the included manifest JSON.\n"
         "Do not force --flash_mode qio when re-merging; the bootloader header is DIO.\n"
     )
     with zipfile.ZipFile(restore, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.write(image, image.name)
         archive.write(checksum, checksum.name)
+        archive.write(manifest, manifest.name)
         archive.writestr("README.txt", readme)
     return restore
 
@@ -171,14 +262,17 @@ def main() -> int:
     checksum = output.with_suffix(output.suffix + ".sha256")
     checksum.write_text(f"{digest}  {output.name}\n", encoding="utf-8")
 
+    manifest = write_manifest(output, checksum, env, files)
+
     print()
-    print(f"image : {output}")
-    print(f"size  : {size} bytes")
-    print(f"sha256: {digest}")
+    print(f"image   : {output}")
+    print(f"size    : {size} bytes")
+    print(f"sha256  : {digest}")
+    print(f"manifest: {manifest}")
 
     if args.zip:
-        restore = make_zip(output, checksum, env)
-        print(f"zip   : {restore}")
+        restore = make_zip(output, checksum, manifest, env)
+        print(f"zip     : {restore}")
 
     return 0
 

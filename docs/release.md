@@ -20,11 +20,9 @@
 ## 2. 发布前检查
 
 - [ ] `git status` 干净，目标分支已合并
-- [ ] `pio run -e guachat_dev` 成功
-- [ ] `python tools/validate.py --static` 通过
-- [ ] `python tools/validate.py --host` 通过
+- [ ] `python tools/validate.py --all` 通过（静态 + 主机 + 构建 + 合并 + 产物校验）
 - [ ] 真机验证：合并镜像可刷写、可启动、串口无重启循环
-- [ ] `python tools/merge_firmware.py --zip` 生成镜像、SHA256、恢复包
+- [ ] `python tools/merge_firmware.py --zip` 生成镜像、SHA256、manifest、恢复包
 - [ ] `THIRD_PARTY_NOTICES.md` 与 `third_party/licenses/` 未过期
 - [ ] 确认没有混入应用业务代码或第二个 `setup()`
 - [ ] 没有把 `dist/`、`.pio/`、密钥、个人数据提交进仓库
@@ -35,9 +33,10 @@
 ## 3. 产物
 
 ```text
-build/guachat-dev-full.bin             # 0x0 合并镜像
-build/guachat-dev-full.bin.sha256      # 校验和
-build/guachat-dev-full-restore.zip     # 镜像 + 校验和 + 刷写说明
+build/guachat-dev-full.bin              # 0x0 合并镜像
+build/guachat-dev-full.bin.sha256       # 校验和
+build/guachat-dev-full.manifest.json    # 镜像/ELF/MAP 身份与 SHA256
+build/guachat-dev-full-restore.zip      # 镜像 + 校验和 + manifest + 刷写说明
 ```
 
 命名规则：

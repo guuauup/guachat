@@ -39,16 +39,20 @@ or any firmware change on this board.
    - Put background work in its own task; hand data to the UI via queue/snapshot.
    - Keep the UI self-contained: build it in code, not from generated UI files.
 5. **Build and validate.**
+   For quick iteration:
    ```bash
    pio run -e guachat_dev
    python tools/validate.py --static
    ```
-6. **Merge firmware if the task asks for a deliverable.**
+   Before delivery, run the complete gate:
    ```bash
-   python tools/merge_firmware.py
+   python tools/validate.py --all
    ```
-7. **Report** in `Build / Host tests / Device tests / Unverified / Artifacts`.
-8. **Ask before flashing.** Compilation or a connected USB cable is not consent.
+   It runs static checks, host tests, the build, the 0x0 merge, and verifies
+   `full.bin` against the SHA256/ELF identity in `manifest.json`.
+6. **Report** in `Build / Host tests / Device tests / Unverified / Artifacts`.
+   Use `PASS / FAIL / NOT RUN`; a successful build is only `Build: PASS`.
+7. **Ask before flashing.** Compilation or a connected USB cable is not consent.
 
 ## Hard rules
 

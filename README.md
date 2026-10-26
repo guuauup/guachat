@@ -34,13 +34,14 @@ pio run -e guachat_dev                 # 编译开发基线
 pio run -e guachat_dev -t upload       # 烧录（先确认串口和设备）
 pio device monitor -b 115200           # 串口日志
 python tools/install_skills.py         # 给 Claude Code 安装 skills/
+python tools/validate.py --all         # 完整门禁：静态+主机+构建+合并+产物校验
 ```
 
 合并为可从 `0x0` 刷写的镜像：
 
 ```bash
 python tools/merge_firmware.py --zip
-# build/guachat-dev-full.bin + .sha256 + restore.zip
+# build/guachat-dev-full.bin + .sha256 + manifest.json + restore.zip
 ```
 
 烧录与合并注意事项见 [docs/build-and-flash.md](docs/build-and-flash.md)。

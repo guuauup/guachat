@@ -23,6 +23,21 @@ description: Diagnose GUACHAT boot loops, panics, display corruption, I2C/SD fai
    - the last `[BSP] ...` line before silence
    - `[BSP] hardware init done`
 
+## Match the ELF before decoding addresses
+
+1. Read `build/guachat-dev-full.manifest.json` and confirm the flashed image's
+   SHA256 matches `merged_image.sha256`.
+2. Use `.pio/build/guachat_dev/firmware.elf` only if its SHA256 matches
+   `artifacts.elf.sha256` in the same manifest.
+3. Decode with the matching file:
+   ```bash
+   ~/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-addr2line \
+     -pfiaC -e .pio/build/guachat_dev/firmware.elf <addresses>
+   ```
+4. If no matching ELF exists, report only what the log establishes and list the
+   missing artifact in `Unverified`. Do not rebuild the current source and
+   pretend it matches the old firmware.
+
 ## Decision table
 
 | Symptom | Likely cause | Action |

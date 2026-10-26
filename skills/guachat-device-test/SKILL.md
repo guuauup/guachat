@@ -22,6 +22,8 @@ build or a connected USB cable is not consent. Ask first, then wait.
    - board and flash size (16 MB)
    - which environment/image
    - whether NVS may be erased (do not erase by default)
+   - if flashing `build/guachat-dev-full.bin`, verify it against
+     `build/guachat-dev-full.manifest.json` (size and SHA256)
 2. List ports:
    ```bash
    pio device list
@@ -48,10 +50,12 @@ build or a connected USB cable is not consent. Ask first, then wait.
    - speaker beep and mic peak
 6. Report:
    ```text
-   Device tests: ...
+   Device tests: PASS / FAIL / NOT RUN
    Unverified: ...
    ```
-   Include the reason for every unverified item.
+   Use `NOT RUN` when the device is inaccessible. Include the reason for every
+   unverified item. Flashing success and clean logs do not prove display,
+   touch, audio, radio, or power behavior.
 
 ## Known baseline facts
 

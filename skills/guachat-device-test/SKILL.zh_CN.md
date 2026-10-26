@@ -22,6 +22,8 @@ description: 在用户明确确认后烧录并在真机上测试 GUACHAT 固件�
    - 板子型号与 Flash 大小（16 MB）
    - 哪个环境/镜像
    - 是否允许清空 NVS（默认不清）
+   - 烧 `build/guachat-dev-full.bin` 前，用
+     `build/guachat-dev-full.manifest.json` 核对大小与 SHA256
 2. 列出串口：
    ```bash
    pio device list
@@ -47,10 +49,11 @@ description: 在用户明确确认后烧录并在真机上测试 GUACHAT 固件�
    - 扬声器蜂鸣与麦克风峰值
 6. 报告：
    ```text
-   Device tests: ...
+   Device tests: PASS / FAIL / NOT RUN
    Unverified: ...
    ```
-   每个未验证项都要写原因。
+   设备不可用时写 `NOT RUN`。每个未验证项都要写原因。烧录成功和日志干净
+   不等于显示、触摸、音频、射频或电源行为已经验证。
 
 ## 已知基线事实
 

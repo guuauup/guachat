@@ -59,6 +59,15 @@ python tools/install_skills.py          # Claude Code：加载 skills/
 
 ### 2.4 构建与验证
 
+交付前跑完整门禁：
+
+```bash
+python tools/validate.py --all
+```
+
+它依次执行静态检查、主机测试、构建、合并 `0x0` 镜像，并校验 `full.bin` 与
+`manifest.json` 中的 SHA256/ELF 身份。迭代时可以先用：
+
 ```bash
 pio run -e guachat_dev
 python tools/validate.py --static
@@ -73,6 +82,8 @@ python tools/validate.py --host
 
 ### 2.5 合并固件
 
+完整门禁已包含合并；只需单独合并时：
+
 ```bash
 python tools/merge_firmware.py
 ```
@@ -82,7 +93,11 @@ python tools/merge_firmware.py
 ```text
 build/guachat-dev-full.bin
 build/guachat-dev-full.bin.sha256
+build/guachat-dev-full.manifest.json
 ```
+
+`manifest.json` 记录 merged image、application、bootloader、partitions、
+boot_app0、ELF、MAP 的路径、大小与 SHA256，用于刷机和崩溃符号匹配。
 
 合并时**保留 bootloader 自带的 DIO 头**，不要强制 QIO。详见
 [`build-and-flash.md`](build-and-flash.md)。
@@ -98,14 +113,16 @@ Agent 必须**先问用户**，得到明确确认后才能烧录。烧录后：
 ### 2.7 报告
 
 ```text
-Build:        ...
-Host tests:   ...
-Device tests: ...
+Build:        PASS / FAIL / NOT RUN
+Host tests:   PASS / FAIL / NOT RUN
+Device tests: PASS / FAIL / NOT RUN
 Unverified:   ...
-Artifacts:    ...
+Artifacts:    ...（含 full.bin、SHA256、manifest.json）
 ```
 
-不要用“应该可以”“理论上正常”代替实测。
+- 没跑就是 `NOT RUN`；编译通过只能写 `Build: PASS`。
+- 不要用“应该可以”“理论上正常”代替实测。
+- 改动射频/分区/启动配置时，单列风险段落。
 
 ---
 
@@ -171,6 +188,10 @@ Build / Host tests / Device tests / Unverified。
 - `guachat-build`：构建、资源预算、合并固件
 - `guachat-device-test`：确认后烧录、串口采集、设备清单
 - `guachat-debug`：启动循环、花屏、I2C、SD、射频排障
+
+这 5 个是开发前必需项：Agent 必须先确认当前环境能发现并读取它们，缺失时
+自行安装；安装失败要报告阻塞点，不能凭目录存在宣称已加载。详见
+[`AGENTS.md`](../AGENTS.md#11-必需技能开发前检查)。
 
 Agent 不需要一次性读完全部；先看 `skills/*/SKILL.md` 的触发条件。
 

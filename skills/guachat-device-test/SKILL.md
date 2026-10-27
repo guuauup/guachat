@@ -21,9 +21,17 @@ build or a connected USB cable is not consent. Ask first, then wait.
 1. Confirm the target:
    - board and flash size (16 MB)
    - which environment/image
-   - whether NVS may be erased (do not erase by default)
-   - if flashing `build/guachat-dev-full.bin`, verify it against
-     `build/guachat-dev-full.manifest.json` (size and SHA256)
+   - whether NVS may be erased. A `full.bin` written at `0x0` writes the NVS
+     region (`0x9000`) and otadata (`0xE000`) but does **not** reliably erase
+     NVS: the merged image is 0xFF-filled there, and a 2026-10-27 flash kept
+     the DRV2605L calibration. To keep settings use
+     `pio run -e guachat_dev -t upload`; to start clean, erase NVS explicitly
+     first
+   - if flashing `build/guachat-dev-full.bin`, run
+     `python tools/verify_firmware.py` and confirm it passes; a matching
+     manifest SHA256 alone is not enough
+   - if flashing from `dist/firmware/<sha256>/`, first run
+     `python tools/archive_firmware.py verify dist/firmware/<sha256>`
 2. List ports:
    ```bash
    pio device list
@@ -42,12 +50,16 @@ build or a connected USB cable is not consent. Ask first, then wait.
    - read for 15–30 seconds
    - check for `rst:` loops and `[BSP] hardware init done`
 5. Run the device checklist in `docs/testing.md`. Record actual readings:
-   - display/touch
+   - boot vibration (one pulse; this board has no power LED; alert level 0 disables it)
+   - display/touch (six tabs; 震动 tab must be reachable without clipped labels)
+   - haptic intensity slider, effect roller, touch feedback switch, and 试震
+   - haptic recalibration (1–3 s buzz; status changes to 校准完成/校准失败)
    - power and TF card
    - SHT30/BMP581/IMU/magnetometer/RTC
    - LoRa TX (and RX only if a second device exists)
    - GPS (outdoor; indoor may be no-fix)
    - speaker beep and mic peak
+   - reboot after changing haptic settings and confirm they persist
 6. Report:
    ```text
    Device tests: PASS / FAIL / NOT RUN

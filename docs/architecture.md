@@ -36,6 +36,8 @@ setup()  (Arduino loopTask)
   ├─ ui_task                         // Core 1, prio 5, 10 ms
   ├─ bsp_gps_init()                  // Core 0 gps 任务
   └─ hw_init_task                    // Core 0, prio 3, 一次性
+        ├─ bsp_haptic_init()         // DRV2605L LRA，读取/执行校准
+        ├─ bsp_haptic_boot_feedback()// 开机震动一次（无电源指示灯）
         ├─ bsp_power_init()          // MAX17055
         ├─ bsp_storage_init()        // TF 卡挂载 /sd
         ├─ bsp_i2c_scan()
@@ -43,6 +45,12 @@ setup()  (Arduino loopTask)
         ├─ bsp_radio_init()          // SX1280，随后进入连续 RX
         └─ bsp_audio_init()          // I2S 全双工 + 功放
 ```
+
+- **开机震动**：设备没有电源指示灯，`hw_init_task` 默认播放一次 DRV2605L
+  Strong Click，提示用户固件已经启动。重写应用时保留；初始化失败只降级为不震动。
+  震动强度/效果/触控反馈保存在 NVS `drv2605`；强度设为 0 时开机震动也会关闭。
+- **震动设置**：`bsp_haptic` 在 `hw_init_task` 里加载 NVS，`dev_ui` 的 1 Hz 定时器
+  在设置加载完成后同步滑块/roller/开关，避免界面先显示默认值。
 
 设计意图：
 
@@ -61,9 +69,11 @@ setup()  (Arduino loopTask)
 | `ui` | 1 | 5 | 8192 | 10 ms | `lv_timer_handler()`，所有 LVGL 调用 |
 | `gps` | 0 | 1 | 4096 | 5 ms | 读 UART0，喂 UBX 解析器 |
 | `radio_test` | 0 | 2 | 8192 | 50 ms 轮询 / 500 ms 发包 | LoRa 自检：只接收，或勾选后周期发 PING |
-| `hw_init` | 0 | 3 | 8192 | 一次性 | 电源/SD/传感器/LoRa/音频初始化后自删 |
+| `haptic_cal` | 0 | 2 | 6144 | 按需一次性 | “震动”页点“重新校准”时创建，跑完 `bsp_haptic_recalibrate()` 自删 |
+| `hw_init` | 0 | 3 | 8192 | 一次性 | 触觉/电源/SD/传感器/LoRa/音频初始化后自删 |
 
-Arduino `loopTask` 只保活，不承担业务。
+Arduino `loopTask` 只做 BSP 低频维护：每 100 ms 调用 `bsp_haptic_tick()` 收回
+震动后的 standby，不承担业务。
 
 **新增任务的上限**：
 

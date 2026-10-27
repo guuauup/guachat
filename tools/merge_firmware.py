@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+TOOLS = ROOT / "tools"
 BUILD_DIR = ROOT / "build"
 
 OFFSETS = {
@@ -86,8 +87,25 @@ def default_output(env: str) -> Path:
 
 
 def run(cmd: list[str]) -> None:
-    print("$ " + " ".join(str(c) for c in cmd))
+    print("$ " + " ".join(str(c) for c in cmd), flush=True)
     subprocess.run(cmd, cwd=ROOT, check=True)
+
+
+def verify_image(output: Path, env: str) -> None:
+    """Run the independent image verifier on the merged result."""
+    cmd = [
+        sys.executable,
+        str(TOOLS / "verify_firmware.py"),
+        "--env",
+        env,
+        "--image",
+        str(output),
+        "--build-dir",
+        str(ROOT / ".pio" / "build" / env),
+        "--boot-app0",
+        str(find_boot_app0()),
+    ]
+    run(cmd)
 
 
 def sha256_file(path: Path) -> str:
@@ -194,6 +212,11 @@ def make_zip(
         f"SHA256: {checksum.read_text(encoding='utf-8').split()[0]}\n\n"
         "Flash from offset 0x0:\n"
         f"  python tools/flash.py {image.name}\n\n"
+        "WARNING: flashing at 0x0 writes the NVS partition (0x9000) and\n"
+        "otadata (0xE000), but does not reliably erase NVS: the merged image\n"
+        "is 0xFF-filled there. Existing settings/calibration may survive.\n"
+        "To keep NVS, upload only the application (pio run -t upload);\n"
+        "to start clean, erase NVS explicitly first.\n\n"
         "Artifacts and hashes are recorded in the included manifest JSON.\n"
         "Do not force --flash_mode qio when re-merging; the bootloader header is DIO.\n"
     )
@@ -206,10 +229,13 @@ def make_zip(
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env", default="guachat_dev", help="PlatformIO environment")
     parser.add_argument("-o", "--output", type=Path, help="output merged image")
     parser.add_argument("--no-build", action="store_true", help="use existing build output")
+    parser.add_argument("--no-verify", action="store_true", help="skip independent image verification")
     parser.add_argument("--zip", action="store_true", help="also create a restore zip")
     args = parser.parse_args()
 
@@ -263,6 +289,9 @@ def main() -> int:
     checksum.write_text(f"{digest}  {output.name}\n", encoding="utf-8")
 
     manifest = write_manifest(output, checksum, env, files)
+
+    if not args.no_verify:
+        verify_image(output, env)
 
     print()
     print(f"image   : {output}")

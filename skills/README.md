@@ -11,7 +11,7 @@
 | --- | --- |
 | [`guachat-develop/`](guachat-develop/) | 需求 → 分支 → 实现 → 验证 → 报告 |
 | [`guachat-setup/`](guachat-setup/) | 安装 PlatformIO / 准备环境 / 首次构建 |
-| [`guachat-build/`](guachat-build/) | 构建、内存预算、0x0 合并固件 |
+| [`guachat-build/`](guachat-build/) | 构建、内存预算、0x0 合并/校验固件、发布归档 |
 | [`guachat-device-test/`](guachat-device-test/) | 确认后烧录、串口采集、设备清单 |
 | [`guachat-debug/`](guachat-debug/) | 启动循环、花屏、I2C/SD、射频/音频排障 |
 
@@ -21,6 +21,7 @@ Claude Code 从项目内 `.claude/skills` 加载技能：
 
 ```bash
 python tools/install_skills.py
+python tools/install_skills.py --check        # 只检查，不写盘
 ```
 
 其他 Agent 如果不认这个目录，可以直接把整个目录复制到它支持的位置：

@@ -26,7 +26,11 @@ description: 诊断 GUACHAT 启动循环、panic、花屏、I2C/SD 故障与射�
 ## 解码地址前先匹配 ELF
 
 1. 读 `build/guachat-dev-full.manifest.json`，确认当前刷入镜像的 SHA256 与
-   `merged_image.sha256` 一致。
+   `merged_image.sha256` 一致。若产物来自发布归档，先校验：
+   ```bash
+   python tools/archive_firmware.py verify dist/firmware/<sha256>
+   ```
+   它会复核每个文件、源 manifest 和内嵌 ELF SHA256。
 2. 只有当 `.pio/build/guachat_dev/firmware.elf` 的 SHA256 等于
    `artifacts.elf.sha256` 时，才能用它解码。
 3. 用匹配的 ELF 执行：
@@ -41,7 +45,8 @@ description: 诊断 GUACHAT 启动循环、panic、花屏、I2C/SD 故障与射�
 
 | 现象 | 可能原因 | 处理 |
 | --- | --- | --- |
-| 只打印 ROM 日志，无应用 | 合并固件强制了 QIO | 去掉 `--flash_mode` 重新合并 |
+| 只打印 ROM 日志，无应用 | 合并固件强制了 QIO | 去掉 `--flash_mode` 重新合并；`verify_firmware.py` 应拒绝该镜像 |
+| `verify_firmware.py` 失败 | 构建陈旧/混入错误文件/镜像被改 | 重新构建合并；通过前不要烧录 |
 | 改代码后启动循环 | 初始化/任务崩溃 | 看 PC，逐步二分初始化顺序 |
 | 黑屏但串口正常 | 背光/TCA9535/LVGL 缓冲 | 查日志、`bsp_backlight_set` |
 | 雪花/条纹 | LoRa 用了 SPI2 | 改回 SPI3 |

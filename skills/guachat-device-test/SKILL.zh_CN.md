@@ -21,9 +21,14 @@ description: 在用户明确确认后烧录并在真机上测试 GUACHAT 固件�
 1. 确认目标：
    - 板子型号与 Flash 大小（16 MB）
    - 哪个环境/镜像
-   - 是否允许清空 NVS（默认不清）
-   - 烧 `build/guachat-dev-full.bin` 前，用
-     `build/guachat-dev-full.manifest.json` 核对大小与 SHA256
+   - 是否允许清空 NVS。从 `0x0` 刷 `full.bin` 会写入 NVS（`0x9000`）
+     和 otadata（`0xE000`），但**不保证清空** NVS：合并镜像在 NVS 区域是
+     0xFF 填充，2026-10-27 实测刷完后 DRV2605L 校准仍保留。要保留设置改用
+     `pio run -e guachat_dev -t upload`；要从零开始先显式擦除 NVS
+   - 烧 `build/guachat-dev-full.bin` 前，运行
+     `python tools/verify_firmware.py` 并确认通过；只看 manifest SHA256 不够
+   - 若从 `dist/firmware/<sha256>/` 烧录，先运行
+     `python tools/archive_firmware.py verify dist/firmware/<sha256>`
 2. 列出串口：
    ```bash
    pio device list
@@ -41,12 +46,16 @@ description: 在用户明确确认后烧录并在真机上测试 GUACHAT 固件�
    - 读取 15–30 秒
    - 检查是否有 `rst:` 循环和 `[BSP] hardware init done`
 5. 按 `docs/testing.md` 的设备清单逐项测试，记录实际读数：
-   - 显示/触摸
+   - 开机震动（一次；本机没有电源指示灯；强度 0 会关闭）
+   - 显示/触摸（六个页签；“震动”页标签不能被裁字）
+   - 震动强度滑块、效果 roller、触控反馈开关、“试震”
+   - 重新校准（1–3 秒嗡鸣；状态变为“校准完成”/“校准失败”）
    - 电源与 TF 卡
    - SHT30/BMP581/IMU/磁力计/RTC
    - LoRa TX（有第二台设备才测 RX）
    - GPS（室外；室内可能无定位）
    - 扬声器蜂鸣与麦克风峰值
+   - 修改震动设置后重启，确认设置保持
 6. 报告：
    ```text
    Device tests: PASS / FAIL / NOT RUN

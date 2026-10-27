@@ -23,6 +23,9 @@
 - [ ] `python tools/validate.py --all` 通过（静态 + 主机 + 构建 + 合并 + 产物校验）
 - [ ] 真机验证：合并镜像可刷写、可启动、串口无重启循环
 - [ ] `python tools/merge_firmware.py --zip` 生成镜像、SHA256、manifest、恢复包
+- [ ] `python tools/archive_firmware.py create --env guachat_dev` 生成发布归档，
+      且 `verify dist/firmware/<sha256>` 通过
+- [ ] GitHub Actions 的 `validate` 与 `firmware` workflow 通过（Gitee 镜像需本地跑同样门禁）
 - [ ] `THIRD_PARTY_NOTICES.md` 与 `third_party/licenses/` 未过期
 - [ ] 确认没有混入应用业务代码或第二个 `setup()`
 - [ ] 没有把 `dist/`、`.pio/`、密钥、个人数据提交进仓库
@@ -37,12 +40,29 @@ build/guachat-dev-full.bin              # 0x0 合并镜像
 build/guachat-dev-full.bin.sha256       # 校验和
 build/guachat-dev-full.manifest.json    # 镜像/ELF/MAP 身份与 SHA256
 build/guachat-dev-full-restore.zip      # 镜像 + 校验和 + manifest + 刷写说明
+
+dist/firmware/<sha256>/                 # 发布归档，目录名 = 合并镜像 SHA256
+  guachat-dev-full.bin
+  guachat-dev-full.bin.sha256
+  guachat-dev-full.manifest.json
+  firmware.elf                          # 崩溃符号匹配
+  firmware.map
+  README.txt
+  archive.json                          # 每个文件的大小与 SHA256
 ```
 
 命名规则：
 
 - 开发基线：`guachat-dev-full.bin`
 - 自定义环境：`<env>-full.bin`
+- 归档目录：合并镜像 SHA256（小写十六进制，64 位）
+
+归档约 32 MB（ELF + MAP 占大头），`dist/` 不入库；发布时作为附件上传。
+校验命令：
+
+```bash
+python tools/archive_firmware.py verify dist/firmware/<sha256>
+```
 
 ---
 
@@ -81,6 +101,7 @@ git push origin v0.2.0
 
 ### 产物
 - `guachat-dev-full.bin` (size, sha256)
+- `dist/firmware/<sha256>/`（镜像 + ELF + MAP + manifest + archive.json）
 
 ### 已知问题
 - ...

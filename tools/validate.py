@@ -80,6 +80,8 @@ REQUIRED_PATHS = [
     "docs/build-and-flash.md",
     "docs/testing.md",
     "src/bsp/bsp_pins.h",
+    "src/bsp/bsp_haptic.h",
+    "src/bsp/bsp_haptic.cpp",
     "src/main.cpp",
     "platformio.ini",
     "partitions_16MB_app.csv",
@@ -99,6 +101,8 @@ REQUIRED_PINS = [
     "BSP_LORA_FREQ_MAX_MHZ",
     "BSP_LORA_POWER_RECOMMENDED_DBM",
     "BSP_LORA_POWER_MAX_DBM",
+    "BSP_I2C_ADDR_DRV2605L",
+    "BSP_HAPTIC_BOOT_EFFECT",
 ]
 
 
@@ -259,32 +263,172 @@ def check_wireless_notice(report: Report) -> None:
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 FENCE_RE = re.compile(r"```.*?```", re.S)
+PROJECT_SCAN_PATHS = [
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "THIRD_PARTY_NOTICES.md",
+    "platformio.ini",
+    "partitions_16MB_app.csv",
+    "docs",
+    "skills",
+    ".github",
+    "src",
+    "tools",
+]
+SECRET_PATTERNS = [
+    ("GitHub token", re.compile(r"(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}")),
+    ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("private key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+]
+CONFLICT_RE = re.compile(r"(?m)^(?:<<<<<<< |=======\s*$|>>>>>>> )")
+
+
+def project_files() -> list[Path]:
+    """Return project-owned text files without scanning vendored lib/ directories."""
+    files: list[Path] = []
+    for item in PROJECT_SCAN_PATHS:
+        target = ROOT / item
+        if target.is_file():
+            files.append(target)
+        elif target.is_dir():
+            files.extend(
+                path
+                for path in sorted(target.rglob("*"))
+                if path.is_file()
+                and "__pycache__" not in path.parts
+                and path.stat().st_size <= 2 * 1024 * 1024
+            )
+    return files
 
 
 def check_doc_links(report: Report) -> None:
     files = [ROOT / "README.md", ROOT / "AGENTS.md", ROOT / "CLAUDE.md"]
-    files.extend(sorted((ROOT / "docs").rglob("*.md")))
+    for directory in ("docs", "skills", ".github"):
+        base = ROOT / directory
+        if base.is_dir():
+            files.extend(sorted(base.rglob("*.md")))
     broken: list[str] = []
     for path in files:
         if not path.exists():
             continue
         text = FENCE_RE.sub("", read(path))
-        for target in LINK_RE.findall(text):
-            target = target.strip()
+        for raw_target in LINK_RE.findall(text):
+            target = raw_target.strip()
+            if target.startswith("<") and target.endswith(">"):
+                target = target[1:-1].strip()
+            else:
+                target = target.split(maxsplit=1)[0] if target.split() else ""
             if not target or target.startswith(("http://", "https://", "mailto:", "#")):
                 continue
-            if target.startswith("/") or target.startswith("<"):
+            if target.startswith("/"):
                 continue
-            target = target.split("#", 1)[0]
-            if not target or "*" in target or "{" in target:
+            local = target.split("#", 1)[0]
+            if not local or "*" in local or "{" in local:
                 continue
-            resolved = (path.parent / target).resolve()
+            resolved = (path.parent / local).resolve()
             if not resolved.exists():
                 broken.append(f"{path.relative_to(ROOT)} -> {target}")
     if broken:
         report.fail("broken documentation link(s):\n  " + "\n  ".join(broken))
     else:
         report.ok("documentation links resolve")
+
+
+def check_secrets(report: Report) -> None:
+    hits: list[str] = []
+    for path in project_files():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for label, pattern in SECRET_PATTERNS:
+            if pattern.search(text):
+                hits.append(f"{path.relative_to(ROOT)}: possible {label}")
+    if hits:
+        report.fail("possible secret(s):\n  " + "\n  ".join(hits))
+    else:
+        report.ok("no high-confidence secret patterns found")
+
+
+def check_conflict_markers(report: Report) -> None:
+    hits: list[str] = []
+    for path in project_files():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if CONFLICT_RE.search(text):
+            hits.append(str(path.relative_to(ROOT)))
+    if hits:
+        report.fail("unresolved merge conflict marker(s): " + ", ".join(hits))
+    else:
+        report.ok("no unresolved merge conflict markers")
+
+
+def check_action_pins(report: Report) -> None:
+    workflow_dir = ROOT / ".github" / "workflows"
+    problems: list[str] = []
+    workflows = sorted(workflow_dir.glob("*.y*ml")) if workflow_dir.is_dir() else []
+    for path in workflows:
+        for number, line in enumerate(read(path).splitlines(), 1):
+            match = re.match(r"\s*-?\s*uses:\s*['\"]?([^'\"\s#]+)", line)
+            if not match:
+                continue
+            action = match.group(1)
+            if action.startswith("./"):
+                continue
+            if action.startswith("docker://"):
+                if "@sha256:" not in action:
+                    problems.append(f"{path.name}:{number}: unpinned Docker action")
+                continue
+            if not re.search(r"@[0-9a-f]{40}$", action):
+                problems.append(f"{path.name}:{number}: action must use a full commit SHA")
+    if problems:
+        report.fail("unpinned GitHub Actions: " + "; ".join(problems))
+    elif not workflows:
+        report.warn("no GitHub workflow files found")
+    else:
+        report.ok(f"all GitHub Actions in {len(workflows)} workflow(s) are SHA-pinned")
+
+
+def check_dependency_pins(report: Report) -> None:
+    text = read(ROOT / "platformio.ini")
+    platform = re.search(r"^platform\s*=\s*(\S+)(?:\s*@\s*(\S+))?", text, re.M)
+    if not platform or not platform.group(2):
+        report.fail("platformio.ini platform must pin an exact version")
+        return
+
+    entries: list[str] = []
+    in_deps = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("lib_deps"):
+            in_deps = True
+            continue
+        if not in_deps:
+            continue
+        if not stripped or stripped.startswith(";"):
+            continue
+        if raw[0] not in " \t":
+            break
+        entries.append(stripped)
+
+    problems = [
+        item
+        for item in entries
+        if not re.search(r"@\d+\.\d+\.\d+(?:\+[A-Za-z0-9._-]+)?$", item)
+        or re.search(r"@[\^~<>=]", item)
+    ]
+    if not entries:
+        report.fail("platformio.ini has no lib_deps entries")
+    elif problems:
+        report.fail(
+            "lib_deps must pin exact versions (no ^/~ ranges): "
+            + "; ".join(problems)
+        )
+    else:
+        report.ok(f"{len(entries)} direct librar(ies) pin exact versions")
 
 
 CJK_RE = re.compile(r"[㐀-䶿一-鿿　-〿＀-￯]")
@@ -399,6 +543,10 @@ def static_checks() -> int:
     check_wireless_notice(report)
     check_fonts(report)
     check_doc_links(report)
+    check_secrets(report)
+    check_conflict_markers(report)
+    check_action_pins(report)
+    check_dependency_pins(report)
     return report.summary("static")
 
 
@@ -467,6 +615,8 @@ def firmware_checks(env: str) -> int:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--static", action="store_true", help="run static checks")
     parser.add_argument("--host", action="store_true", help="run host tests")

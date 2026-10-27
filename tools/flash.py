@@ -91,7 +91,11 @@ def main() -> int:
 
         confirm(
             f"About to flash {image} at offset 0x0 "
-            f"(port={args.port or 'auto'}, baud={args.baud}).",
+            f"(port={args.port or 'auto'}, baud={args.baud}).\n"
+            "This writes the NVS partition (0x9000) and otadata (0xE000), but "
+            "does not reliably erase NVS: the merged image is 0xFF-filled there, "
+            "so existing settings/calibration may survive. To keep NVS, use "
+            "'pio run -t upload' instead; to start clean, erase NVS explicitly.",
             args.yes,
         )
         cmd = [

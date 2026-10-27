@@ -14,7 +14,7 @@ GPS、IMU/磁力计/气压/温湿度/RTC、TF 卡、I2S 麦克风与功放、电
 
 本仓库不是“成品应用仓库”，而是**给 Agent 和二次开发者用的地基**：
 
-- `src/bsp/` 是板级支持层（BSP），封装屏幕、触摸、电源、存储、传感器、LoRa、GPS、音频。
+- `src/bsp/` 是板级支持层（BSP），封装屏幕、触摸、电源、存储、传感器、LoRa、GPS、音频、触觉。
 - `[env:guachat_dev]` 是最小开发基线：只初始化 BSP 和一个**硬件自检界面**，可直接编译烧录。
 - `main` **不包含应用业务代码**：只保留 BSP、开发基线、文档和工具。新应用从
   `src/dev/` 开始，并整体重写界面。
@@ -108,18 +108,65 @@ python tools/install_skills.py --print
 
 详见 [`docs/concurrency.md`](docs/concurrency.md)。
 
-### 2.6 构建、验证、烧录
+### 2.6 开机震动提示（不要删除）
+
+本机**没有电源指示灯**。屏幕如果因固件或硬件问题没有亮起，用户无法判断设备是否已经开机。
+因此基线在 `hw_init_task` 中默认执行一次：
+
+```cpp
+bsp_haptic_init();
+bsp_haptic_boot_feedback();   // DRV2605L LRA，Strong Click 100%
+```
+
+- 这是开机反馈，不是应用功能。重写界面时**保留这次震动**；除非你提供了等效的
+  开机提示，否则不要删除。
+- 震动由 `src/bsp/bsp_haptic.*` 提供，底层是 `src/I2C0/DRV2605L.*`；
+  应用不要直接操作 DRV2605L 寄存器。
+- 马达、电压、效果号和 LRA 参数在 `src/bsp/bsp_pins.h` 的 `BSP_HAPTIC_*` 中定义。
+- 触觉初始化失败（0x5A 无应答）只降级为“不震动”，不得阻止设备启动。
+- 使用 `bsp_haptic_play()` / `bsp_haptic_alert()` 后，应用必须周期调用
+  `bsp_haptic_tick()`（基线在 `loop()` 中每 100 ms 调用一次），否则驱动不会回到 standby。
+
+**用户可调震动**（NVS 命名空间 `drv2605`，与原机键名兼容）：
+
+| 设置 | API | 默认 | 说明 |
+| --- | --- | --- | --- |
+| 提醒强度 | `bsp_haptic_get/set_alert_level` | 5 | 0 = 关闭；1..10 映射约 1.0–2.1 V |
+| 提醒效果 | `bsp_haptic_get/set_alert_effect` | 48 | 0 = 关闭；ROM Library 6 效果号 |
+| 触控反馈 | `bsp_haptic_get/set_key_feedback` | 开 | 按钮/滑块调用 `bsp_haptic_key_click()` |
+
+- 强度为 0 时**开机也不震动**（与原 GUACHAT-2G4 一致）；排查“开机不震”先看这个设置。
+- 应用里的按钮、滑块、roller、开关应在事件回调里调用 `bsp_haptic_key_click()`
+  （低压 Sharp Tick），不要自己调 `bsp_haptic_alert()` 做触控反馈。
+- 重新校准用 `bsp_haptic_recalibrate()`：阻塞 1–3 秒且马达会嗡鸣，
+  **只能放后台任务**，不得在 LVGL 回调里直接调用。`src/dev/dev_ui.cpp` 的“震动”页
+  是完整示例（强度滑块、效果 roller、触控开关、试震、重新校准）。
+
+### 2.7 构建、验证、烧录
 
 - 默认构建环境：`pio run -e guachat_dev`。
 - 交付前必须跑完整门禁：`python tools/validate.py --all`。
   它依次执行静态检查、主机测试、构建、合并 `0x0` 镜像，并校验 `full.bin` 与
   `manifest.json` 中的 SHA256/ELF 身份。迭代时可用 `--static` / `--host` 缩短时间。
+- 合并后必须通过 `python tools/verify_firmware.py` 独立校验：芯片/Flash、DIO 头、
+  分区表 magic 与 MD5、app 分区、应用描述符、ELF SHA256，以及四个组件偏移处的
+  字节。`merge_firmware.py` 已默认调用它；不要用 `--no-verify` 掩盖失败。
+- 需要交付或存档时，用 `python tools/archive_firmware.py create --env guachat_dev`
+  生成 `dist/firmware/<sha256>/`（镜像、校验和、manifest、ELF、MAP、archive.json），
+  再用 `verify <目录>` 复核。`dist/` 不入库。
 - **未经用户明确确认，不得烧录**。编译成功、插着 USB、用户说过“可以测试”都不等于授权。
 - 烧录前先问；烧录后报告串口日志与设备现象。
 - 合并 0x0 固件时**不要强制 `--flash_mode qio`**：PlatformIO 生成的 bootloader 头是 DIO，
   强制 QIO 会导致 `TG0WDT_SYS_RST` 启动循环。使用 `tools/merge_firmware.py`，它会保留原头。
+- **从 `0x0` 刷写 `full.bin` 不保证清空 NVS**（`0x9000` 起）和 otadata
+  （`0xE000`）：合并镜像在 NVS 区域是 0xFF 填充，2026-10-27 实测刷完后
+  DRV2605L 校准仍保留。需要从零校准/清空设置时先显式擦除 NVS；需要保留设置时
+  不要刷 `full.bin`，改用 `pio run -e guachat_dev -t upload`，或只把
+  `firmware.bin` 写到 `0x10000`。
+- GitHub Actions 会跑静态/主机检查与固件构建；Gitee 不执行 GitHub Actions，
+  在 Gitee 上交付前必须本地跑同一套门禁。
 
-### 2.7 射频与合规（告知，不是禁止）
+### 2.8 射频与合规（告知，不是禁止）
 
 - 本仓库默认是 **LoRa 2.4G** 配置：2402–2482 MHz，默认/推荐 7 dBm，板载天线。
   模块硬件上限 20 dBm；固件**不做 7 dBm 策略封顶**，高于 7 dBm 只在串口提示风险。
@@ -148,6 +195,7 @@ python tools/install_skills.py --print
 | GPS | MAX-M10S，UART0，TX 43 / RX 44，230400 |
 | 按键 | BOOT GPIO0（低有效） |
 | 电池 | 单节 18650，4.4 V / 5200 mAh（开源硬件）；MAX17055 电量计；建议低于 3.40 V 自动关机（基线 3.3 V），关机后 HT7125S 可给 GPS + RTC 备用 >30 天 |
+| 触觉 | DRV2605L，I2C0 0x5A，X 轴 LRA，Library 6；开机默认震动一次（Strong Click 100%） |
 
 完整引脚与电源树见 [`docs/hardware/硬件连接说明.md`](docs/hardware/硬件连接说明.md)
 和 [`docs/hardware/电源树.md`](docs/hardware/电源树.md)。
@@ -168,10 +216,12 @@ BSP 会以 `mag_ok=false` 降级，这不一定是驱动 bug；先确认硬件�
    - 中文界面必须检查字库覆盖（见 [`docs/fonts.md`](docs/fonts.md)）。
 5. 迭代时编译并修复所有警告/错误：`pio run -e guachat_dev`。
 6. 交付前跑完整门禁：`python tools/validate.py --all`
-   （静态 + 主机 + 构建 + 合并 + manifest/SHA256/ELF 校验）。
+   （静态 + 主机 + 构建 + 合并 + 独立镜像校验 + manifest/SHA256/ELF 校验）。
 7. 完整门禁已包含合并；只需单独合并时：`python tools/merge_firmware.py`。
-8. 询问用户是否上机；确认后才烧录并采集串口日志。
-9. 按第 6 节格式报告。
+8. 需要交付固件时生成归档：`python tools/archive_firmware.py create --env guachat_dev`，
+   并用 `verify dist/firmware/<sha256>` 复核。
+9. 询问用户是否上机；确认后才烧录并采集串口日志。
+10. 按第 6 节格式报告。
 
 ---
 
@@ -196,7 +246,7 @@ Build:        PASS / FAIL / NOT RUN（附 RAM/Flash 占用）
 Host tests:   PASS / FAIL / NOT RUN（跑了哪些、结果如何）
 Device tests: PASS / FAIL / NOT RUN（真机实际验证了什么）
 Unverified:   没有条件验证的项，写清原因（例如没有第二台 LoRa 设备）
-Artifacts:    合并固件路径、大小、SHA256、manifest.json（若生成）
+Artifacts:    合并固件路径、大小、SHA256、manifest.json、归档目录（若生成）
 ```
 
 - 没跑就是 `NOT RUN`，不能写“应该没问题”；编译通过只能写 `Build: PASS`。
@@ -253,8 +303,14 @@ python tools/validate.py --all      # 完整门禁：静态+主机+构建+合并
 # 单独合并为可从 0x0 刷写的镜像（完整门禁已包含）
 python tools/merge_firmware.py --zip
 
+# 独立镜像校验 / 发布归档
+python tools/verify_firmware.py
+python tools/archive_firmware.py create --env guachat_dev
+python tools/archive_firmware.py verify dist/firmware/<sha256>
+
 # Claude Code 技能包（装到 .claude/skills）
 python tools/install_skills.py
+python tools/install_skills.py --check
 ```
 
 ---
@@ -264,8 +320,9 @@ python tools/install_skills.py
 | 你要做什么 | 先读 |
 | --- | --- |
 | 了解整体架构、启动顺序、任务模型 | [`docs/architecture.md`](docs/architecture.md) |
-| 调用 BSP（屏幕/触摸/电源/SD/传感器/LoRa/GPS/音频） | [`docs/bsp-api.md`](docs/bsp-api.md) |
-| 搭环境、编译、生成合并固件、恢复 | [`docs/build-and-flash.md`](docs/build-and-flash.md) |
+| 调用 BSP（屏幕/触摸/电源/SD/传感器/LoRa/GPS/音频/触觉） | [`docs/bsp-api.md`](docs/bsp-api.md) |
+| 搭环境、编译、生成/校验合并固件、发布归档、恢复 | [`docs/build-and-flash.md`](docs/build-and-flash.md) |
+| 版本、发布产物与发布检查 | [`docs/release.md`](docs/release.md) |
 | 安排任务、避免 LVGL/I2C/SD 并发问题 | [`docs/concurrency.md`](docs/concurrency.md) |
 | 做中文界面、生成字体 | [`docs/fonts.md`](docs/fonts.md) |
 | 自测、写测试报告 | [`docs/testing.md`](docs/testing.md) |

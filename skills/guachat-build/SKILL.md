@@ -17,8 +17,9 @@ description: Build GUACHAT firmware, check memory budgets, and produce a 0x0 mer
    ```bash
    python tools/validate.py --all
    ```
-   It runs static checks, host tests, the build, the 0x0 merge, and verifies
-   `full.bin` against `manifest.json` (size, SHA256, matching ELF).
+   It runs static checks, host tests, the build, the 0x0 merge, verifies
+   `full.bin` against `manifest.json` (size, SHA256, matching ELF), and runs
+   `tools/verify_firmware.py` to parse the image independently.
 2. For a build-only check:
    ```bash
    pio run -e guachat_dev
@@ -36,10 +37,27 @@ description: Build GUACHAT firmware, check memory budgets, and produce a 0x0 mer
    ```
    The manifest binds the merged image, application, bootloader, partitions,
    ELF, and MAP with their SHA256.
-5. Report:
+5. Verify independently (the merge tool already does this unless `--no-verify`):
+   ```bash
+   python tools/verify_firmware.py
+   python tools/verify_firmware.py --image-only --image build/guachat-dev-full.bin
+   ```
+   It checks chip/flash size, a DIO bootloader (QIO fails), partition table
+   magic and MD5, range/overlap, the app partition, the app descriptor, the
+   embedded ELF SHA256, and component bytes at `0x0/0x8000/0xE000/0x10000`.
+   A matching manifest SHA256 is not a substitute.
+6. Create a release archive when delivering:
+   ```bash
+   python tools/archive_firmware.py create --env guachat_dev
+   python tools/archive_firmware.py verify dist/firmware/<sha256>
+   ```
+   The directory is named by the merged-image SHA256 and contains the image,
+   checksum, manifest, `firmware.elf`, `firmware.map`, `README.txt`, and
+   `archive.json`. It is about 32 MB; `dist/` is gitignored.
+7. Report:
    - Build status (`PASS / FAIL / NOT RUN`)
    - memory percentages
-   - artifact path, size, SHA256, manifest path
+   - artifact path, size, SHA256, manifest path, archive path
    - warnings (RF/wireless notices are not failures)
 
 ## Manual merge
@@ -52,8 +70,22 @@ python tools/merge_firmware.py --no-build
 
 Without `--no-build`, the tool builds first and then merges.
 
+## CI
+
+- `.github/workflows/validate.yml` runs `validate.py --static --host`.
+- `.github/workflows/firmware.yml` builds `guachat_dev`, merges, verifies,
+  archives, and uploads the image, checksum, manifest, restore zip, and
+  `dist/firmware/**` (14-day retention).
+- Gitee does not run GitHub Actions. Run the same gate locally before
+  delivering from a Gitee mirror.
+
 ## Hard rules
 
+- Flashing `full.bin` from `0x0` writes the NVS region (`0x9000`) and otadata
+  (`0xE000`) but does **not** reliably erase NVS: the merged image is 0xFF-filled
+  there, and a 2026-10-27 flash kept the DRV2605L calibration. To keep NVS, use
+  `pio run -e guachat_dev -t upload` or write only `firmware.bin` at `0x10000`;
+  to start from scratch, erase NVS explicitly first.
 - Do not force `--flash_mode qio`. The bootloader header is DIO; QIO causes a
   `TG0WDT_SYS_RST` boot loop.
 - Do not run `pio pkg update`; it may replace the vendored LVGL.
@@ -65,6 +97,7 @@ Without `--no-build`, the tool builds first and then merges.
 build/guachat-dev-full.bin
 build/guachat-dev-full.bin.sha256
 build/guachat-dev-full.manifest.json
+dist/firmware/<sha256>/   # only when archiving
 ```
 
 ## Fallbacks

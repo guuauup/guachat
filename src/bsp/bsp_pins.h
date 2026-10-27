@@ -62,6 +62,16 @@
 #define BSP_I2C_ADDR_DRV2605L    0x5A
 #define BSP_I2C_ADDR_LSM6DS3TRC  0x6A
 
+/* ── 触觉：DRV2605L LRA（I2C0 0x5A） ───────────────────────
+ * 电压寄存器值换算式：V = reg * 21.6 mV。
+ * 下列值是原 GUACHAT-2G4 在 10×10×3.6 mm LRA 上的实测配置。 */
+#define BSP_HAPTIC_RATED_RV      0x74   /* 额定 ≈2.51 V（校准用） */
+#define BSP_HAPTIC_CLAMP_RV      0x97   /* 钳位 ≈3.26 V */
+#define BSP_HAPTIC_IDLE_RV       0x0A   /* 空闲低压 */
+#define BSP_HAPTIC_ALERT_RV      0x44   /* 提醒 ≈1.47 V（原机默认强度） */
+#define BSP_HAPTIC_LRA_PERIOD    0x3C   /* 谐振周期，约 169 Hz */
+#define BSP_HAPTIC_BOOT_EFFECT   1      /* ROM Library 6：Strong Click 100% */
+
 /* ── I2C1：触摸 FT6336U，400 kHz ───────────────────────────── */
 #define BSP_I2C1_SDA             47
 #define BSP_I2C1_SCL             48

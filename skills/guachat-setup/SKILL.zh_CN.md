@@ -28,10 +28,12 @@ description: 在一台干净电脑上准备 GUACHAT 构建环境。缺少 Platfo
    pio run -e guachat_dev
    ```
    首次会下载 `platform-espressif32 @ 6.5.0`、Arduino 框架、esptool 和 `lib_deps`。
-4. 确认入口文件存在：
+4. 确认入口文件与技能存在：
    ```bash
    ls AGENTS.md docs/README.md src/bsp/bsp_pins.h
+   python tools/install_skills.py --check
    ```
+   `--check` 不写盘；有 `MISSING` 时用 `python tools/install_skills.py` 安装。
 5. 报告：
    - PlatformIO / Python 版本
    - 构建结果与 RAM/Flash 占用

@@ -20,6 +20,7 @@
 #include "bsp/bsp_audio.h"
 #include "bsp/bsp_display.h"
 #include "bsp/bsp_gps.h"
+#include "bsp/bsp_haptic.h"
 #include "bsp/bsp_pins.h"
 #include "bsp/bsp_power.h"
 #include "bsp/bsp_radio.h"
@@ -36,6 +37,37 @@ lv_obj_t *s_tx_lbl     = nullptr;
 lv_obj_t *s_gps_lbl    = nullptr;
 lv_obj_t *s_audio_lbl  = nullptr;
 lv_obj_t *s_bl_label   = nullptr;
+
+/* 震动页 */
+lv_obj_t *s_haptic_lbl         = nullptr;
+lv_obj_t *s_haptic_level_value = nullptr;
+lv_obj_t *s_haptic_level_slider = nullptr;
+lv_obj_t *s_haptic_effect_roller = nullptr;
+lv_obj_t *s_haptic_key_switch  = nullptr;
+lv_obj_t *s_haptic_preview_btn = nullptr;
+lv_obj_t *s_haptic_cal_btn     = nullptr;
+
+/* 震动效果选项：0 = 关闭，其余为 DRV2605L Library 6 效果号 */
+constexpr uint8_t kHapticEffects[] = {0, 48, 14, 12, 1, 44};
+const char *const kHapticEffectNames[] = {
+    "关闭", "嗡鸣 2", "强嗡鸣", "三击", "强击", "长双击",
+};
+constexpr size_t kHapticEffectCount =
+    sizeof(kHapticEffects) / sizeof(kHapticEffects[0]);
+
+enum HapticCalState : uint8_t {
+    HAPTIC_CAL_IDLE,
+    HAPTIC_CAL_RUNNING,
+    HAPTIC_CAL_OK,
+    HAPTIC_CAL_FAIL,
+};
+
+volatile HapticCalState s_haptic_cal_state = HAPTIC_CAL_IDLE;
+lv_timer_t *s_haptic_level_timer  = nullptr;
+lv_timer_t *s_haptic_effect_timer = nullptr;
+uint8_t s_haptic_pending_level = BSP_HAPTIC_ALERT_LEVEL_DEFAULT;
+bool s_haptic_ui_syncing = false;
+bool s_haptic_controls_synced = false;
 
 /* 背光：滑块直接对应 LEDC 占空比 71..170，标签显示 1..100%（duty - 70）。
    测试固件不做持久化，开机回默认值。 */
@@ -136,6 +168,287 @@ void apply_chinese_font(lv_obj_t *obj)
     const uint32_t count = lv_obj_get_child_cnt(obj);
     for (uint32_t i = 0; i < count; ++i) {
         apply_chinese_font(lv_obj_get_child(obj, i));
+    }
+}
+
+/* ---------------- 震动页 ---------------- */
+
+/* 效果号 → roller 索引；不在预设列表里返回 -1。 */
+int haptic_effect_index(uint8_t effect)
+{
+    if (effect == 0) {
+        return 0;
+    }
+    for (size_t i = 1; i < kHapticEffectCount; ++i) {
+        if (kHapticEffects[i] == effect) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+void haptic_effect_label(uint8_t effect, char *out, size_t len)
+{
+    const int idx = haptic_effect_index(effect);
+    if (idx >= 0) {
+        snprintf(out, len, "%s", kHapticEffectNames[idx]);
+    } else {
+        snprintf(out, len, "效果 %u", (unsigned)effect);
+    }
+}
+
+void update_haptic_level_label(uint8_t level)
+{
+    if (!s_haptic_level_value) {
+        return;
+    }
+    if (level == 0) {
+        lv_label_set_text(s_haptic_level_value, "关闭");
+    } else {
+        lv_label_set_text_fmt(s_haptic_level_value, "%u%%",
+                              (unsigned)level * 10);
+    }
+}
+
+/* 震动设置在 hw_init_task 里异步加载；加载完成后把控件同步到 NVS 值。
+   用户已经操作过控件时不再覆盖。 */
+void sync_haptic_controls(void)
+{
+    if (!s_haptic_level_slider || !s_haptic_effect_roller ||
+        !s_haptic_key_switch) {
+        return;
+    }
+
+    s_haptic_ui_syncing = true;
+
+    const uint8_t level = bsp_haptic_get_alert_level();
+    s_haptic_pending_level = level;
+    lv_slider_set_value(s_haptic_level_slider, level, LV_ANIM_OFF);
+    update_haptic_level_label(level);
+
+    int idx = haptic_effect_index(bsp_haptic_get_alert_effect());
+    if (idx < 0) {
+        idx = 0;
+    }
+    lv_roller_set_selected(s_haptic_effect_roller, (uint16_t)idx,
+                           LV_ANIM_OFF);
+
+    if (bsp_haptic_get_key_feedback()) {
+        lv_obj_add_state(s_haptic_key_switch, LV_STATE_CHECKED);
+    } else {
+        lv_obj_clear_state(s_haptic_key_switch, LV_STATE_CHECKED);
+    }
+
+    s_haptic_ui_syncing = false;
+}
+
+void refresh_haptic_label(void)
+{
+    if (!s_haptic_lbl) {
+        return;
+    }
+
+    const bool ready = bsp_haptic_ready();
+    const uint8_t level = bsp_haptic_get_alert_level();
+    const uint8_t effect = bsp_haptic_get_alert_effect();
+    const bool key = bsp_haptic_get_key_feedback();
+
+    char strength[16];
+    if (level == 0) {
+        snprintf(strength, sizeof(strength), "关闭");
+    } else {
+        snprintf(strength, sizeof(strength), "%u%%", (unsigned)level * 10);
+    }
+
+    char effect_name[24];
+    haptic_effect_label(effect, effect_name, sizeof(effect_name));
+
+    const char *cal = "就绪";
+    if (!ready) {
+        cal = "未检测到";
+    } else {
+        switch (s_haptic_cal_state) {
+        case HAPTIC_CAL_RUNNING: cal = "校准中..."; break;
+        case HAPTIC_CAL_OK:      cal = "校准完成"; break;
+        case HAPTIC_CAL_FAIL:    cal = "校准失败"; break;
+        default:                 cal = "就绪"; break;
+        }
+    }
+
+    lv_label_set_text_fmt(s_haptic_lbl,
+                          "DRV2605L 线性马达\n"
+                          "  状态 : %s\n"
+                          "  强度 : %s\n"
+                          "  效果 : %s\n"
+                          "  触控 : %s\n"
+                          "  校准 : %s",
+                          ready ? "正常" : "未检测到",
+                          strength, effect_name, key ? "开" : "关", cal);
+
+    if (s_haptic_cal_btn) {
+        if (s_haptic_cal_state == HAPTIC_CAL_RUNNING) {
+            lv_obj_add_state(s_haptic_cal_btn, LV_STATE_DISABLED);
+        } else {
+            lv_obj_clear_state(s_haptic_cal_btn, LV_STATE_DISABLED);
+        }
+    }
+}
+
+void haptic_level_apply_cb(lv_timer_t *timer)
+{
+    lv_timer_del(timer);
+    s_haptic_level_timer = nullptr;
+
+    bsp_haptic_set_alert_level(s_haptic_pending_level);
+    if (s_haptic_pending_level > 0) {
+        bsp_haptic_preview(BSP_HAPTIC_EFFECT_STRONG_CLICK_100);
+    }
+    refresh_haptic_label();
+}
+
+void haptic_level_cb(lv_event_t *e)
+{
+    if (s_haptic_ui_syncing ||
+        lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
+        return;
+    }
+    s_haptic_controls_synced = true;
+    const int value = (int)lv_slider_get_value(lv_event_get_target(e));
+    s_haptic_pending_level = (uint8_t)value;
+    update_haptic_level_label((uint8_t)value);
+
+    /* 拖动时不反复写 NVS/重启震动；停手 250 ms 后应用并试强度。 */
+    if (s_haptic_level_timer) {
+        lv_timer_del(s_haptic_level_timer);
+        s_haptic_level_timer = nullptr;
+    }
+    s_haptic_level_timer =
+        lv_timer_create(haptic_level_apply_cb, 250, nullptr);
+}
+
+void haptic_effect_apply_cb(lv_timer_t *timer)
+{
+    lv_timer_del(timer);
+    s_haptic_effect_timer = nullptr;
+
+    if (!s_haptic_effect_roller) {
+        return;
+    }
+    const uint16_t idx = lv_roller_get_selected(s_haptic_effect_roller);
+    const uint8_t effect =
+        (idx < kHapticEffectCount) ? kHapticEffects[idx] : 0;
+
+    bsp_haptic_set_alert_effect(effect);
+    if (effect != 0) {
+        bsp_haptic_preview(effect);
+    }
+    refresh_haptic_label();
+}
+
+void haptic_effect_cb(lv_event_t *e)
+{
+    if (s_haptic_ui_syncing ||
+        lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
+        return;
+    }
+    s_haptic_controls_synced = true;
+
+    /* roller 滚动会连续触发；停手 300 ms 后才保存并试震。 */
+    if (s_haptic_effect_timer) {
+        lv_timer_del(s_haptic_effect_timer);
+        s_haptic_effect_timer = nullptr;
+    }
+    s_haptic_effect_timer =
+        lv_timer_create(haptic_effect_apply_cb, 300, nullptr);
+}
+
+void haptic_preview_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    const uint8_t effect = bsp_haptic_get_alert_effect();
+    if (effect != 0) {
+        bsp_haptic_preview(effect);
+    }
+}
+
+void haptic_key_feedback_cb(lv_event_t *e)
+{
+    if (s_haptic_ui_syncing ||
+        lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
+        return;
+    }
+    s_haptic_controls_synced = true;
+    const bool enabled =
+        lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+    bsp_haptic_set_key_feedback(enabled);
+    refresh_haptic_label();
+}
+
+void haptic_cal_task(void *)
+{
+    const bool ok = bsp_haptic_recalibrate();
+    s_haptic_cal_state = ok ? HAPTIC_CAL_OK : HAPTIC_CAL_FAIL;
+    vTaskDelete(nullptr);
+}
+
+void haptic_recalibrate_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    if (s_haptic_cal_state == HAPTIC_CAL_RUNNING) {
+        return;
+    }
+    if (!bsp_haptic_ready()) {
+        s_haptic_cal_state = HAPTIC_CAL_FAIL;
+        refresh_haptic_label();
+        return;
+    }
+
+    s_haptic_cal_state = HAPTIC_CAL_RUNNING;
+    refresh_haptic_label();
+
+    /* 校准阻塞 1–3 秒，必须在后台任务里做，不能卡住 LVGL。 */
+    if (xTaskCreatePinnedToCore(haptic_cal_task, "haptic_cal", 6144,
+                                nullptr, 2, nullptr, 0) != pdPASS) {
+        s_haptic_cal_state = HAPTIC_CAL_FAIL;
+        refresh_haptic_label();
+    }
+}
+
+void key_click_cb(lv_event_t *e)
+{
+    (void)e;
+    bsp_haptic_key_click();
+}
+
+/* 给按钮/滑块/roller/开关统一加低压触控反馈。
+   震动页的强度滑块、效果 roller、试震按钮有自己的高压预览，跳过。 */
+void add_haptic_feedback(lv_obj_t *obj)
+{
+    if (!obj) {
+        return;
+    }
+    if (obj == s_haptic_level_slider || obj == s_haptic_effect_roller ||
+        obj == s_haptic_preview_btn) {
+        return;
+    }
+
+    if (lv_obj_check_type(obj, &lv_btn_class)) {
+        lv_obj_add_event_cb(obj, key_click_cb, LV_EVENT_CLICKED, nullptr);
+    } else if (lv_obj_check_type(obj, &lv_roller_class)) {
+        lv_obj_add_event_cb(obj, key_click_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    } else if (lv_obj_check_type(obj, &lv_switch_class)) {
+        lv_obj_add_event_cb(obj, key_click_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    } else if (lv_obj_check_type(obj, &lv_slider_class)) {
+        lv_obj_add_event_cb(obj, key_click_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    }
+
+    const uint32_t count = lv_obj_get_child_cnt(obj);
+    for (uint32_t i = 0; i < count; ++i) {
+        add_haptic_feedback(lv_obj_get_child(obj, i));
     }
 }
 
@@ -390,6 +703,13 @@ void update_cb(lv_timer_t *timer)
     if (s_audio_lbl) {
         lv_label_set_text(s_audio_lbl, buf);
     }
+
+    /* hw_init_task 异步加载 NVS；加载完成后同步一次控件。 */
+    if (!s_haptic_controls_synced && bsp_haptic_settings_loaded()) {
+        s_haptic_controls_synced = true;
+        sync_haptic_controls();
+    }
+    refresh_haptic_label();
 }
 
 }  // namespace
@@ -411,16 +731,21 @@ void dev_ui_build(void)
                               LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_set_style_text_color(tab_btns, lv_color_hex(0xFFFFFF),
                                 LV_PART_ITEMS | LV_STATE_CHECKED);
-    /* 中文标签 18 px，收紧 item 内边距，避免 5 个页签被裁字 */
+    /* 中文标签 18 px，收紧 item 内边距，避免 6 个页签被裁字 */
     lv_obj_set_style_pad_all(tab_btns, 2, LV_PART_ITEMS);
+    /* 页签本身是 btnmatrix，不在 add_haptic_feedback() 的匹配类型里 */
+    lv_obj_add_event_cb(tab_btns, key_click_cb, LV_EVENT_VALUE_CHANGED,
+                        nullptr);
 
     lv_obj_t *tab_power  = lv_tabview_add_tab(tv, "电源");
-    lv_obj_t *tab_sensor = lv_tabview_add_tab(tv, "传感器");
+    lv_obj_t *tab_sensor = lv_tabview_add_tab(tv, "传感");
     lv_obj_t *tab_radio  = lv_tabview_add_tab(tv, "LoRa");
     lv_obj_t *tab_gps    = lv_tabview_add_tab(tv, "GPS");
     lv_obj_t *tab_audio  = lv_tabview_add_tab(tv, "音频");
+    lv_obj_t *tab_haptic = lv_tabview_add_tab(tv, "震动");
 
-    lv_obj_t *tabs[] = {tab_power, tab_sensor, tab_radio, tab_gps, tab_audio};
+    lv_obj_t *tabs[] = {tab_power, tab_sensor, tab_radio, tab_gps,
+                        tab_audio, tab_haptic};
     for (lv_obj_t *tab : tabs) {
         lv_obj_set_style_bg_color(tab, lv_color_hex(0x101418), 0);
         lv_obj_set_style_pad_all(tab, 8, 0);
@@ -476,7 +801,78 @@ void dev_ui_build(void)
 
     bsp_audio_set_volume(80);
 
+    /* ---- 震动页 ---- */
+    s_haptic_lbl = add_info_label(tab_haptic);
+
+    lv_obj_t *level_title = lv_label_create(tab_haptic);
+    lv_label_set_text(level_title, "强度");
+    lv_obj_set_style_text_color(level_title, lv_color_hex(0xA0AEC0), 0);
+    lv_obj_align(level_title, LV_ALIGN_TOP_LEFT, 0, 132);
+
+    s_haptic_level_value = lv_label_create(tab_haptic);
+    lv_obj_set_style_text_color(s_haptic_level_value,
+                                lv_color_hex(0xE2E8F0), 0);
+    lv_obj_align(s_haptic_level_value, LV_ALIGN_TOP_RIGHT, 0, 132);
+
+    s_haptic_level_slider = lv_slider_create(tab_haptic);
+    lv_obj_set_width(s_haptic_level_slider, 280);
+    lv_obj_set_height(s_haptic_level_slider, 20);
+    lv_slider_set_range(s_haptic_level_slider,
+                        BSP_HAPTIC_ALERT_LEVEL_MIN,
+                        BSP_HAPTIC_ALERT_LEVEL_MAX);
+    lv_slider_set_value(s_haptic_level_slider,
+                        bsp_haptic_get_alert_level(), LV_ANIM_OFF);
+    lv_obj_align(s_haptic_level_slider, LV_ALIGN_TOP_MID, 0, 158);
+    lv_obj_add_event_cb(s_haptic_level_slider, haptic_level_cb,
+                        LV_EVENT_VALUE_CHANGED, nullptr);
+    /* 摸到强度滑块先给一次低压反馈；高压试强度在停手 250 ms 后。 */
+    lv_obj_add_event_cb(s_haptic_level_slider, key_click_cb,
+                        LV_EVENT_PRESSED, nullptr);
+
+    lv_obj_t *effect_title = lv_label_create(tab_haptic);
+    lv_label_set_text(effect_title, "效果");
+    lv_obj_set_style_text_color(effect_title, lv_color_hex(0xA0AEC0), 0);
+    lv_obj_align(effect_title, LV_ALIGN_TOP_LEFT, 0, 192);
+
+    s_haptic_effect_roller = lv_roller_create(tab_haptic);
+    lv_roller_set_options(s_haptic_effect_roller,
+                          "关闭\n嗡鸣 2\n强嗡鸣\n三击\n强击\n长双击",
+                          LV_ROLLER_MODE_NORMAL);
+    lv_obj_set_size(s_haptic_effect_roller, 220, 84);
+    lv_obj_align(s_haptic_effect_roller, LV_ALIGN_TOP_MID, 0, 214);
+    int effect_idx = haptic_effect_index(bsp_haptic_get_alert_effect());
+    if (effect_idx < 0) {
+        effect_idx = 0;
+    }
+    lv_roller_set_selected(s_haptic_effect_roller, (uint16_t)effect_idx,
+                           LV_ANIM_OFF);
+    lv_obj_add_event_cb(s_haptic_effect_roller, haptic_effect_cb,
+                        LV_EVENT_VALUE_CHANGED, nullptr);
+
+    lv_obj_t *key_title = lv_label_create(tab_haptic);
+    lv_label_set_text(key_title, "触控反馈");
+    lv_obj_set_style_text_color(key_title, lv_color_hex(0xA0AEC0), 0);
+    lv_obj_align(key_title, LV_ALIGN_TOP_LEFT, 0, 312);
+
+    s_haptic_key_switch = lv_switch_create(tab_haptic);
+    lv_obj_align(s_haptic_key_switch, LV_ALIGN_TOP_RIGHT, 0, 306);
+    if (bsp_haptic_get_key_feedback()) {
+        lv_obj_add_state(s_haptic_key_switch, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(s_haptic_key_switch, haptic_key_feedback_cb,
+                        LV_EVENT_VALUE_CHANGED, nullptr);
+
+    s_haptic_preview_btn = add_button(tab_haptic, "试震", haptic_preview_cb);
+    s_haptic_cal_btn = add_button(tab_haptic, "重新校准",
+                                  haptic_recalibrate_cb);
+    lv_obj_align(s_haptic_cal_btn, LV_ALIGN_BOTTOM_RIGHT, 0, -4);
+
+    s_haptic_pending_level = bsp_haptic_get_alert_level();
+    update_haptic_level_label(s_haptic_pending_level);
+    refresh_haptic_label();
+
     apply_chinese_font(scr);
+    add_haptic_feedback(scr);
 
     s_state_lock = xSemaphoreCreateMutex();
     if (xTaskCreatePinnedToCore(radio_test_task, "radio_test", 8192,

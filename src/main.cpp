@@ -14,6 +14,7 @@
 #include "bsp/bsp_audio.h"
 #include "bsp/bsp_display.h"
 #include "bsp/bsp_gps.h"
+#include "bsp/bsp_haptic.h"
 #include "bsp/bsp_i2c.h"
 #include "bsp/bsp_input.h"
 #include "bsp/bsp_pins.h"
@@ -31,6 +32,10 @@
 static void hw_init_task(void *arg)
 {
     (void)arg;
+
+    /* 没有电源指示灯：先初始化触觉并震动一次，提示用户设备已经开机 */
+    bsp_haptic_init();
+    bsp_haptic_boot_feedback();
 
     bsp_power_init();
     bsp_storage_init();
@@ -98,6 +103,7 @@ void setup()
 
 void loop()
 {
-    // 所有 UI 工作都在 uiTask；Arduino loop 任务仅保活。
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    // 所有 UI 工作都在 uiTask；Arduino loop 任务只做 BSP 低频维护。
+    bsp_haptic_tick();
+    vTaskDelay(pdMS_TO_TICKS(100));
 }

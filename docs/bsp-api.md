@@ -22,6 +22,8 @@ dev_ui_build();                           // 你的界面（并应用默认背�
 
 // Core 0，后台
 bsp_gps_init();
+bsp_haptic_init();                        // DRV2605L
+bsp_haptic_boot_feedback();               // 开机震动一次
 bsp_power_init();
 bsp_storage_init();
 bsp_sensors_init();
@@ -30,8 +32,9 @@ bsp_audio_init();
 ```
 
 - `bsp_display_lvgl_init()` / `bsp_input_init()` 必须在 `lv_init()` 之后。
-- `bsp_power_init()` / `bsp_sensors_init()` 依赖 I2C0 已初始化。
+- `bsp_power_init()` / `bsp_sensors_init()` / `bsp_haptic_init()` 依赖 I2C0 已初始化。
 - 所有 `bsp_*_init()` 都允许失败，应用必须能降级运行。
+- 开机震动是硬件提示，不是应用功能；见第 9 节。
 
 ---
 
@@ -298,7 +301,86 @@ bsp_audio_write_pcm16(pcm, frames, 100);   // 阻塞到写完或 100 ms 超时
 
 ---
 
-## 9. `bsp_i2c.h` — 诊断
+## 9. `bsp_haptic.h` — 触觉（DRV2605L LRA）
+
+```c
+bool bsp_haptic_init(void);
+bool bsp_haptic_ready(void);
+bool bsp_haptic_settings_loaded(void);   // NVS 设置是否已加载
+
+bool bsp_haptic_play(uint8_t effect);    // 固定默认提醒电压，非阻塞
+bool bsp_haptic_alert(void);             // 按用户设置的效果 + 强度播放
+bool bsp_haptic_preview(uint8_t effect); // 按用户强度试听指定效果
+bool bsp_haptic_key_click(void);         // 低压触控反馈
+
+bool bsp_haptic_recalibrate(void);       // 重新校准，阻塞 1–3 秒
+
+uint8_t bsp_haptic_get_alert_level(void);          // 0..10，0 = 关闭
+bool    bsp_haptic_set_alert_level(uint8_t level);
+uint8_t bsp_haptic_get_alert_effect(void);         // 0 = 关闭
+bool    bsp_haptic_set_alert_effect(uint8_t effect);
+bool    bsp_haptic_get_key_feedback(void);
+void    bsp_haptic_set_key_feedback(bool enabled);
+
+void bsp_haptic_boot_feedback(void);     // 开机震动一次，只生效一次
+void bsp_haptic_tick(void);              // 周期调用；播放完回 standby
+void bsp_haptic_stop(void);
+```
+
+- 本机**没有电源指示灯**。`main.cpp` 在 `hw_init_task` 中调用
+  `bsp_haptic_init()` + `bsp_haptic_boot_feedback()`，用一次 Strong Click
+  提示用户设备已经开机。**重写界面时保留这次震动**，或提供等效的开机提示。
+- 常用效果号：`BSP_HAPTIC_EFFECT_STRONG_CLICK_100`(1)、`SHARP_CLICK_100`(4)、
+  `DOUBLE_CLICK_100`(10)、`TRIPLE_CLICK_100`(12)、`STRONG_BUZZ_100`(14)、
+  `LONG_DOUBLE_100`(44)、`BUZZ_2_80`(48)、`KEY_CLICK`(26)。
+  完整 123 个效果见 DRV2605 数据手册 §11.2（Library 6 = LRA）。
+- 用户设置保存在 NVS 命名空间 `drv2605`，键名与原 GUACHAT-2G4 兼容：
+  `alert_lvl`(0..10)、`alert_eff`(0..123，0=关)、`kb_on`(触控反馈)。默认
+  强度 5、效果 48（Buzz 2 80%）、触控反馈开。
+- 强度 0 时 `bsp_haptic_alert()` / `bsp_haptic_preview()` 不播放，
+  **开机震动也会关闭**（与原机一致）。强度 1..10 映射到 RATEDV 46..97
+  （约 1.0–2.1 V）；默认 5 对应 `BSP_HAPTIC_ALERT_RV`(0x44)。
+- `bsp_haptic_play(effect)` 固定使用 `BSP_HAPTIC_ALERT_RV`，不读取用户设置；
+  需要遵循用户设置时用 `bsp_haptic_alert()` 或 `bsp_haptic_preview()`。
+- 触控反馈：在按钮 `LV_EVENT_CLICKED`、滑块/roller/switch 的
+  `LV_EVENT_VALUE_CHANGED` 回调里调用 `bsp_haptic_key_click()`。它播放效果 26
+  （Sharp Tick 3 60%）并使用空闲低压 `BSP_HAPTIC_IDLE_RV`(0x0A)；开关关闭时
+  立即返回 `false`。`src/dev/dev_ui.cpp` 的 `add_haptic_feedback()` 是递归绑定示例。
+- `bsp_haptic_recalibrate()` 会阻塞 1–3 秒并让马达嗡鸣，**只能在后台任务里调用**；
+  成功后覆盖 NVS 中的 `comp`/`emp`/`fb`。校准期间其它播放/触控反馈调用会直接
+  跳过（不阻塞 UI），`bsp_haptic_tick()` 也暂时跳过。
+- `bsp_haptic_play()` / `bsp_haptic_alert()` 立即返回；必须周期调用
+  `bsp_haptic_tick()`（建议 100–500 ms），播放完成或超过 3 秒后驱动自动恢复
+  空闲电压并进入 standby。基线在 `loop()` 中每 100 ms 调用一次。
+- 初始化会读取 NVS 中的校准数据；没有时执行 LRA 自动校准并保存到命名空间
+  `drv2605`。首次启动（NVS 无校准）会多花 1–2 秒，并伴随校准震动。
+  `full.bin` 从 `0x0` 刷写不保证清空 NVS；需要从零校准时先显式擦除。
+- 触觉初始化失败（0x5A 无应答）只降级为“不震动”，不影响其它 BSP 和外设。
+- 不要直接写 DRV2605L 寄存器；电压、效果号和 LRA 参数在
+  `bsp_pins.h` 的 `BSP_HAPTIC_*` 中定义，设置默认值在 `bsp_haptic.h`。
+
+触控反馈示例：
+
+```cpp
+lv_obj_add_event_cb(btn, [](lv_event_t *) {
+    bsp_haptic_key_click();
+}, LV_EVENT_CLICKED, nullptr);
+```
+
+后台重新校准示例：
+
+```cpp
+static void haptic_cal_task(void *)
+{
+    const bool ok = bsp_haptic_recalibrate();
+    // 只写快照/标志，由 UI 定时器读取；不要在这个任务里调用 lv_*
+    vTaskDelete(nullptr);
+}
+```
+
+---
+
+## 10. `bsp_i2c.h` — 诊断
 
 ```c
 void bsp_i2c_scan(void);
@@ -309,7 +391,7 @@ bool bsp_i2c_read_reg(uint8_t addr, uint8_t reg, uint8_t *value);
 
 ---
 
-## 10. 一个最小应用骨架
+## 11. 一个最小应用骨架
 
 ```cpp
 #include <Arduino.h>
@@ -361,6 +443,10 @@ void loop()
     vTaskDelay(pdMS_TO_TICKS(1000));
 }
 ```
+
+实际基线还会在 `hw_init_task` 中调用 `bsp_haptic_init()` +
+`bsp_haptic_boot_feedback()`，并在 `loop()` 中调用 `bsp_haptic_tick()`；
+这是无电源指示灯时的开机提示，重写应用时保留。
 
 更多可用接口见 `src/bsp/*.h`。如果你需要新的 BSP 能力，先加在 `src/bsp/`，
 再在 `bsp_pins.h` 登记硬件参数，最后更新本文档。

@@ -29,10 +29,13 @@ description: Prepare a clean machine to build GUACHAT firmware. Use when Platfor
    ```
    First run downloads `platform-espressif32 @ 6.5.0`, the Arduino framework,
    esptool, and `lib_deps`.
-4. Verify the entry contract is present:
+4. Verify the entry contract and skills are present:
    ```bash
    ls AGENTS.md docs/README.md src/bsp/bsp_pins.h
+   python tools/install_skills.py --check
    ```
+   `--check` writes nothing; install with `python tools/install_skills.py`
+   if a skill reports `MISSING`.
 5. Report:
    - PlatformIO / Python versions
    - build result and RAM/Flash usage

@@ -30,10 +30,10 @@
 | [`architecture.md`](architecture.md) | 权威 | 构建环境、启动顺序、任务模型、内存布局、数据流 |
 | [`bsp-api.md`](bsp-api.md) | 权威 | 每个 BSP 模块的 API、线程约束、示例 |
 | [`concurrency.md`](concurrency.md) | 权威 | LVGL 单任务模型、任务优先级、I2C/SD 互斥 |
-| [`build-and-flash.md`](build-and-flash.md) | 权威 | 装环境、构建、合并 0x0 固件、烧录、恢复 |
-| [`testing.md`](testing.md) | 权威 | 静态检查、主机测试、设备测试清单、报告格式 |
+| [`build-and-flash.md`](build-and-flash.md) | 权威 | 装环境、构建、合并/校验 0x0 固件、发布归档、CI、烧录、恢复 |
+| [`testing.md`](testing.md) | 权威 | 静态检查、主机测试、镜像/归档校验、设备测试清单、报告格式 |
 | [`fonts.md`](fonts.md) | 权威 | 中文字库、子集生成、覆盖检查 |
-| [`release.md`](release.md) | 权威 | 版本、产物、发布检查 |
+| [`release.md`](release.md) | 权威 | 版本、产物、发布归档、发布检查 |
 | [`troubleshooting.md`](troubleshooting.md) | 参考 | 启动循环、花屏、I2C 卡死、射频异常 |
 
 ## 硬件
@@ -59,4 +59,4 @@
 | LoRa 收发 | `bsp-api.md`（radio）→ `hardware/射频与合规.md` |
 | 加任务/定时器 | `concurrency.md` |
 | 编译过了但开机崩 | `troubleshooting.md` → `testing.md` |
-| 准备交付 | `testing.md` → `build-and-flash.md`（合并固件） |
+| 准备交付 | `testing.md` → `build-and-flash.md`（合并/校验/归档） → `release.md` |

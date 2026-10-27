@@ -40,6 +40,11 @@ def main() -> int:
         help="only print the source and destination paths",
     )
     parser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify that every skill is already installed; write nothing",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="overwrite existing skill directories",
@@ -54,6 +59,21 @@ def main() -> int:
     target = Path(args.target).expanduser()
     if not target.is_absolute():
         target = ROOT / target
+    if target.exists() and not target.is_dir():
+        print(f"target is not a directory: {target}")
+        return 1
+
+    if args.check:
+        missing = [source.name for source in dirs if not (target / source.name / "SKILL.md").is_file()]
+        for source in dirs:
+            state = "MISSING" if source.name in missing else "OK"
+            print(f"[{state}] {source.name} -> {target / source.name}")
+        print()
+        if missing:
+            print(f"{len(missing)} of {len(dirs)} skill(s) missing from {target}")
+            return 1
+        print(f"All {len(dirs)} skill(s) are installed in {target}")
+        return 0
 
     for source in dirs:
         destination = target / source.name

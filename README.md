@@ -16,11 +16,11 @@
 
 | 资产 | 位置 | 说明 |
 | --- | --- | --- |
-| BSP | [src/bsp/](src/bsp/) | 屏幕、触摸、电源、TF 卡、传感器、LoRa、GPS、音频的稳定 API |
+| BSP | [src/bsp/](src/bsp/) | 屏幕、触摸、电源、TF 卡、传感器、LoRa、GPS、音频、触觉的稳定 API |
 | 硬件常量 | [src/bsp/bsp_pins.h](src/bsp/bsp_pins.h) | **引脚/地址的唯一来源**，不要猜 |
-| 最小应用 | [src/dev/](src/dev/) | 初始化骨架 + 五页签硬件自检界面，可整体替换 |
+| 最小应用 | [src/dev/](src/dev/) | 初始化骨架 + 六页签硬件自检界面，可整体替换 |
 | 文档 | [docs/](docs/) | 架构、BSP API、并发、字体、构建、测试、排障 |
-| 工具 | [tools/](tools/) | 静态检查、主机测试、合并固件、字体检查 |
+| 工具 | [tools/](tools/) | 静态检查、主机测试、合并/校验固件、发布归档、字体检查 |
 | Skills | [skills/](skills/) | 给 Agent 按需加载的工作流 |
 
 设备端没有 AI 运行时。Agent 的产出是**新固件**，需要重新编译和烧录。
@@ -37,15 +37,25 @@ python tools/install_skills.py         # 给 Claude Code 安装 skills/
 python tools/validate.py --all         # 完整门禁：静态+主机+构建+合并+产物校验
 ```
 
-合并为可从 `0x0` 刷写的镜像：
+合并为可从 `0x0` 刷写的镜像，并独立校验：
 
 ```bash
 python tools/merge_firmware.py --zip
 # build/guachat-dev-full.bin + .sha256 + manifest.json + restore.zip
+python tools/verify_firmware.py
 ```
 
-烧录与合并注意事项见 [docs/build-and-flash.md](docs/build-and-flash.md)。
+需要交付或存档时，再生成发布归档：
+
+```bash
+python tools/archive_firmware.py create --env guachat_dev
+python tools/archive_firmware.py verify dist/firmware/<sha256>
+# 镜像 + 校验和 + manifest + ELF + MAP + archive.json
+```
+
+烧录、合并、校验与 CI 说明见 [docs/build-and-flash.md](docs/build-and-flash.md)。
 **合并时保留 bootloader 自带的 DIO 头，不要强制 QIO。**
+**`full.bin` 从 `0x0` 刷写不保证清空 NVS（设置/校准）；要保留 NVS 请用 `pio run -e guachat_dev -t upload`，要从零校准请先显式擦除 NVS。**
 
 ---
 
@@ -55,6 +65,7 @@ python tools/merge_firmware.py --zip
 | --- | --- |
 | 主控 | ESP32-S3-WROOM-1U（N16R8），16 MB Flash + 8 MB OPI PSRAM |
 | 显示/触摸 | 4.0″ IPS 320×480，ST7796 + FT6336U |
+| 触觉 | DRV2605L（I2C0 0x5A），X 轴 LRA；开机默认震动一次；强度/效果/触控反馈可在“震动”页调整并持久化 |
 | LoRa | E28-2G4M20S（SX1280），2402–2482 MHz，SPI3 |
 | 气压/温湿度 | BMP581 + SHT30 |
 | 磁力计 / IMU | QMC5883P / LSM6DS3TRC |
@@ -93,6 +104,10 @@ Build / Host tests / Device tests / Unverified。
 ### 开发规则（摘要）
 
 - 硬件参数以 `bsp_pins.h` 为准，不猜引脚。
+- 本机没有电源指示灯：开机默认震动一次（`bsp_haptic_boot_feedback()`），
+  重写界面时保留，用于提示用户设备已经启动。强度设置为 0 时会同时关闭开机震动。
+- 触控反馈用 `bsp_haptic_key_click()`；强度/效果/开关走 `bsp_haptic_*` 设置 API。
+  重新校准 `bsp_haptic_recalibrate()` 阻塞 1–3 秒，只能放后台任务。
 - 所有 `lv_*` 只在 LVGL 任务里调用；本项目没有全局 LVGL 锁。
 - 界面直接用 LVGL 写，不使用外部 UI 生成器。
 - 未经用户确认不烧录；合并固件不要强制 QIO。

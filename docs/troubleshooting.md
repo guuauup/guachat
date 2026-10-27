@@ -28,6 +28,24 @@
 - 背光在 `bsp_display_init()` 里先设为 3%，`dev_ui_build()` 再设为默认
   100（约 30%）；确认执行到了。
 - 检查 TCA9535 是否初始化成功（P16 显示屏复位）。
+
+### 1.4 震动异常（无电源指示灯）
+
+| 可能原因 | 判断 | 处理 |
+| --- | --- | --- |
+| DRV2605L 无应答 | 串口有 `[DRV2605L] ERROR: device not found`；I2C0 扫描无 0x5A | 查焊接/供电/上拉；EN 已上拉到 VDD |
+| 强度设置为 0 | “震动”页强度显示“关闭”；NVS `drv2605/alert_lvl=0` | 调到 1–10；**0 会同时关闭开机震动**（与原机一致） |
+| 触控反馈没有震动 | “震动”页触控反馈关闭；NVS `drv2605/kb_on=false` | 打开开关；按钮/滑块用 `bsp_haptic_key_click()` |
+| 首次校准未完成或失败 | 日志有 `LRA auto-calibration... timeout` | 确认马达连接；仍会用 `BSP_HAPTIC_LRA_PERIOD` 尝试播放 |
+| 重新校准失败 | “震动”页显示“校准失败”；日志 `WARN`/`timeout` | 确认马达连接；失败后仍使用固定 LRA 周期，可再试 |
+| 震动太弱 | 能感觉到但很轻 | 调“震动”页强度；硬件默认值见 `BSP_HAPTIC_ALERT_RV`（约 21.6 mV/级） |
+| 固件删掉了开机反馈 | `src/main.cpp` 无 `bsp_haptic_boot_feedback()` | 恢复调用；见 `AGENTS.md` 2.6 |
+
+- 首次启动（NVS 无校准）或显式擦除 NVS 后，会先自动校准 1–2 秒再播放开机震动。
+  `full.bin` 从 `0x0` 刷写不保证清空 NVS；需要从零校准时先显式擦除。
+- 播放后由 `loop()` 的 `bsp_haptic_tick()` 收回 standby；不要删除它。
+- “重新校准”在 Core 0 的 `haptic_cal` 任务里阻塞 1–3 秒；校准期间按钮/滑块反馈会
+  暂时跳过，属于正常现象。
 - LVGL 缓冲分配失败会停在 `while(true)`；看日志 `LVGL buffer allocation failed`。
 
 ---

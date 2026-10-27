@@ -27,6 +27,11 @@ description: Diagnose GUACHAT boot loops, panics, display corruption, I2C/SD fai
 
 1. Read `build/guachat-dev-full.manifest.json` and confirm the flashed image's
    SHA256 matches `merged_image.sha256`.
+   If the artifact came from a release archive, verify it first:
+   ```bash
+   python tools/archive_firmware.py verify dist/firmware/<sha256>
+   ```
+   This re-checks every file, the source manifest, and the embedded ELF SHA256.
 2. Use `.pio/build/guachat_dev/firmware.elf` only if its SHA256 matches
    `artifacts.elf.sha256` in the same manifest.
 3. Decode with the matching file:
@@ -42,7 +47,8 @@ description: Diagnose GUACHAT boot loops, panics, display corruption, I2C/SD fai
 
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
-| Repeated ROM log, no app | merged image forced QIO | re-merge without `--flash_mode` |
+| Repeated ROM log, no app | merged image forced QIO | re-merge without `--flash_mode`; `verify_firmware.py` should reject it |
+| `verify_firmware.py` fails | stale/mixed build or tampered image | rebuild and re-merge; do not flash until it passes |
 | Boot loop after a code change | crash in init/task | read PC, bisect init order |
 | Black screen, serial OK | backlight / TCA9535 / LVGL buffer | check logs, `bsp_backlight_set` |
 | Snow/stripes | LoRa on SPI2 | move LoRa to SPI3 |

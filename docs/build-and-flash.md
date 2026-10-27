@@ -97,8 +97,9 @@ ESP32-S3 从 `0x0` 开始读 bootloader。把四个文件按偏移合并：
 ### 3.1 用工具（推荐）
 
 ```bash
-python tools/merge_firmware.py                # 默认 guachat_dev
+python tools/merge_firmware.py                # 默认 guachat_dev，合并后自动校验
 python tools/merge_firmware.py --zip          # 同时生成恢复包
+python tools/merge_firmware.py --no-verify    # 仅在明确知道原因时跳过校验
 ```
 
 产物：
@@ -107,13 +108,23 @@ python tools/merge_firmware.py --zip          # 同时生成恢复包
 build/guachat-dev-full.bin
 build/guachat-dev-full.bin.sha256
 build/guachat-dev-full.manifest.json
+build/guachat-dev-full-restore.zip            # 加 --zip 时
 ```
 
 `manifest.json` 把 merged image、application、bootloader、partitions、
 boot_app0、ELF、MAP 的路径、大小与 SHA256 绑在一起。刷机和崩溃符号匹配时，
 以 manifest 里的 merged image / ELF 身份为准。
 
-工具会保留 bootloader 头里的 flash mode，不会强制 QIO。
+> **`full.bin` 从 `0x0` 连续写入，会写 `0x9000` 起的 NVS 区域和 `0xE000` 的
+> otadata。** 但合并镜像在 NVS 区域是 0xFF 填充，实测刷完后校准仍保留；
+> 不要依赖全量镜像清空 NVS。需要从零校准/清空设置时，先显式擦除 NVS
+> 或执行 `erase_flash`；需要保留 NVS 时不要刷 `full.bin`：
+> 用 `pio run -e guachat_dev -t upload`，或只把 `firmware.bin` 写到 `0x10000`。
+> 早先日志中的 `nvs_open failed: NOT_FOUND` 只说明当时 NVS 中没有该命名空间，
+> 不能单独证明是刷写清空的。
+
+合并完成后，工具默认调用 `tools/verify_firmware.py` 做独立校验，不只看
+esptool 的退出码。工具会保留 bootloader 头里的 flash mode，不会强制 QIO。
 
 ### 3.2 手工命令
 
@@ -137,19 +148,59 @@ $PY $ESPTOOL --chip esp32s3 merge_bin \
 > `TG0WDT_SYS_RST` 启动循环，表现为反复打印 ROM 日志、没有应用输出。
 > 保留默认（不传 `--flash_mode`）即可，设备启动日志会显示 `mode:DIO`。
 
-### 3.3 校验
+### 3.3 独立校验
 
 ```bash
-sha256sum build/guachat-dev-full.bin
-cat build/guachat-dev-full.bin.sha256
-cat build/guachat-dev-full.manifest.json
+python tools/verify_firmware.py                 # 校验构建产物与合并镜像
+python tools/verify_firmware.py --image-only    # 只校验合并镜像（可用 --image 指定）
 ```
 
-完整门禁会再次核对 manifest 中的 SHA256 与 ELF 身份：
+它不依赖 manifest 的自述，而是直接解析镜像：
+
+- 镜像头 magic、芯片 ID（ESP32-S3）、Flash 容量（16 MB）；
+- bootloader 的 flash mode 必须是 DIO，QIO 直接失败；
+- 分区表 magic、MD5、区间重叠与越界，app 分区必须容纳应用；
+- 应用描述符 magic，以及描述符内嵌的 ELF SHA256 与同名 ELF 一致；
+- `0x0` / `0x8000` / `0xE000` / `0x10000` 四个偏移处的字节与构建目录一致。
+
+manifest 里的 SHA256 只是记录，不能代替上述校验。完整门禁
+（`python tools/validate.py --all`）也会调用同一个校验器。
+
+### 3.4 发布归档
 
 ```bash
-python tools/validate.py --all
+python tools/archive_firmware.py create --env guachat_dev
+python tools/archive_firmware.py verify dist/firmware/<sha256>
 ```
+
+归档目录以合并镜像的 SHA256 命名：
+
+```text
+dist/firmware/<sha256>/
+  guachat-dev-full.bin
+  guachat-dev-full.bin.sha256
+  guachat-dev-full.manifest.json
+  firmware.elf
+  firmware.map
+  README.txt
+  archive.json
+```
+
+`create` 会先校验构建，再复制 image / checksum / manifest / ELF / MAP，
+最后重新校验；目标已存在且校验通过时保持幂等。`verify` 检查目录名等于镜像
+SHA256、没有多余文件、每个文件的大小与 SHA256、源 manifest 与镜像一致，
+并用 `verify_firmware.py` 再次核对 ELF 身份。归档约 32 MB（ELF + MAP 占大头），
+`dist/` 已被 `.gitignore` 忽略，不要提交。
+
+### 3.5 CI（仅 GitHub）
+
+`.github/workflows/validate.yml` 在每次 push / PR 运行 `validate.py --static --host`；
+`.github/workflows/firmware.yml` 在源码变化时构建 `guachat_dev`、合并 `0x0` 镜像、
+生成归档，并上传镜像、校验和、manifest、恢复包与 `dist/firmware/**`（保留 14 天）。
+两个 workflow 都固定了 Action 的完整 commit SHA。
+
+Gitee 不会执行 GitHub Actions。Gitee 镜像上的验证必须在本地跑
+`python tools/validate.py --all`，或在 Gitee Go 中另配流水线。
 
 ---
 
@@ -180,6 +231,10 @@ python tools/flash.py build/guachat-dev-full.bin
 ```bash
 esptool.py --chip esp32s3 --baud 921600 write_flash 0x0 build/guachat-dev-full.bin
 ```
+
+这会写入 NVS 区域与 otadata，但不保证清空已有 NVS（本次实测校准仍保留）。
+烧录前必须确认用户接受“可能丢失、也可能保留”的不确定状态；需要明确保留时改用
+`pio run -e guachat_dev -t upload`，需要明确清空时先显式擦除 NVS。
 
 ### 4.3 烧录前必须确认
 

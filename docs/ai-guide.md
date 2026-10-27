@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | 入口契约 | [`AGENTS.md`](../AGENTS.md) | 规定边界、禁止项、报告格式 |
 | 文档索引 | [`README.md`](README.md) | 按问题取文档，不必通读 |
-| BSP | `src/bsp/` | 屏幕/触摸/电源/SD/传感器/LoRa/GPS/音频的稳定 API |
+| BSP | `src/bsp/` | 屏幕/触摸/电源/SD/传感器/LoRa/GPS/音频/触觉的稳定 API |
 | 最小基线 | `[env:guachat_dev]` + `src/dev/` | 可直接编译烧录的起点和用法示例 |
 | 验证工具 | `tools/` | 静态检查、编译、合并固件、字体检查 |
 | Skills | `skills/` | 把重复工作流打包给 Agent 按需加载 |
@@ -51,10 +51,16 @@ python tools/install_skills.py          # Claude Code：加载 skills/
 推荐顺序：
 
 1. 在 `src/main.cpp` 保留初始化骨架（Serial → TCA9535 → display → LVGL → input → UI → 背光 → 任务）。
-2. 把 `src/dev/dev_ui.cpp` 整体替换成新界面；不要保留页签布局后只换文字。
-3. 需要新外设时，先看 `src/bsp/*.h` 和 `docs/bsp-api.md`；确需新驱动时放在 `src/` 下并走 BSP 封装。
-4. 所有 LVGL 操作留在 `ui_task`；后台任务通过队列/快照交给 UI。
-5. 中文界面：优先用 `src/fonts/fonts.h` 里的 `ui_font_syhtm18`，设置
+2. 保留 `hw_init_task` 里的开机反馈：`bsp_haptic_init()` +
+   `bsp_haptic_boot_feedback()`，以及 `loop()` 里的 `bsp_haptic_tick()`。
+   本机没有电源指示灯，一次震动用于告诉用户固件已经启动；除非提供等效提示，
+   否则不要删除。用户把强度设为 0 时开机震动会自动关闭。
+   新界面的按钮/滑块触控反馈调用 `bsp_haptic_key_click()`；
+   重新校准 `bsp_haptic_recalibrate()` 阻塞 1–3 秒，只能放后台任务。
+3. 把 `src/dev/dev_ui.cpp` 整体替换成新界面；不要保留页签布局后只换文字。
+4. 需要新外设时，先看 `src/bsp/*.h` 和 `docs/bsp-api.md`；确需新驱动时放在 `src/` 下并走 BSP 封装。
+5. 所有 LVGL 操作留在 `ui_task`；后台任务通过队列/快照交给 UI。
+6. 中文界面：优先用 `src/fonts/fonts.h` 里的 `ui_font_syhtm18`，设置
    `lv_obj_set_style_text_font()`；缺字时再生成子集字体并做覆盖检查。
 
 ### 2.4 构建与验证
@@ -65,13 +71,15 @@ python tools/install_skills.py          # Claude Code：加载 skills/
 python tools/validate.py --all
 ```
 
-它依次执行静态检查、主机测试、构建、合并 `0x0` 镜像，并校验 `full.bin` 与
-`manifest.json` 中的 SHA256/ELF 身份。迭代时可以先用：
+它依次执行静态检查、主机测试、构建、合并 `0x0` 镜像，并用
+`tools/verify_firmware.py` 独立校验镜像结构、分区 MD5、应用描述符和 ELF 身份。
+迭代时可以先用：
 
 ```bash
 pio run -e guachat_dev
 python tools/validate.py --static
 python tools/validate.py --host
+python tools/verify_firmware.py         # 已有构建时单独复核
 ```
 
 必须处理编译错误与新增警告。资源占用要记录：
@@ -99,6 +107,22 @@ build/guachat-dev-full.manifest.json
 `manifest.json` 记录 merged image、application、bootloader、partitions、
 boot_app0、ELF、MAP 的路径、大小与 SHA256，用于刷机和崩溃符号匹配。
 
+合并后必须通过独立校验（`merge_firmware.py` 默认已调用）：
+
+```bash
+python tools/verify_firmware.py
+```
+
+需要交付或存档时，生成以镜像 SHA256 命名的归档：
+
+```bash
+python tools/archive_firmware.py create --env guachat_dev
+python tools/archive_firmware.py verify dist/firmware/<sha256>
+```
+
+归档包含镜像、校验和、manifest、ELF、MAP 与 `archive.json`；`dist/` 不入库。
+注意：从 `0x0` 刷 `full.bin` 不保证清空 NVS（设置/校准）；需要保留时改用
+`pio run -e guachat_dev -t upload`，需要从零校准时先显式擦除 NVS。
 合并时**保留 bootloader 自带的 DIO 头**，不要强制 QIO。详见
 [`build-and-flash.md`](build-and-flash.md)。
 
@@ -117,7 +141,7 @@ Build:        PASS / FAIL / NOT RUN
 Host tests:   PASS / FAIL / NOT RUN
 Device tests: PASS / FAIL / NOT RUN
 Unverified:   ...
-Artifacts:    ...（含 full.bin、SHA256、manifest.json）
+Artifacts:    ...（含 full.bin、SHA256、manifest.json、归档目录）
 ```
 
 - 没跑就是 `NOT RUN`；编译通过只能写 `Build: PASS`。
@@ -171,8 +195,10 @@ Build / Host tests / Device tests / Unverified。
 | 在后台任务里直接 `lv_label_set_text` | 用队列/快照，在 UI 任务里更新 |
 | 在 `uiTask` 里周期 `Serial.print` | 删除；需要日志时用低频或独立任务 |
 | 直接 `Wire.beginTransmission` | 走 Manager / `i2cBusLock` |
+| 删掉开机震动 | 本机没有电源指示灯；保留 `bsp_haptic_boot_feedback()` 或提供等效提示 |
 | 新增 `src/apps/` 后忘了编译 | `main` 单环境，文件在 `src/` 下会被编译；跑一次 `pio run -e guachat_dev` 确认 |
 | 合并固件强制 `--flash_mode qio` | 保留 DIO 头 |
+| manifest 里的 SHA256 对得上就认为镜像正确 | 跑 `verify_firmware.py` 解析结构与 ELF 身份 |
 | 中文直接 `lv_label_set_text("你好")` | 先确认字库覆盖，补子集字体 |
 | 改 `src/bsp/bsp_pins.h` 不同步文档 | 两边一起改 |
 | 编译通过就报告“功能正常” | 真机验证后再写 Device tests |
@@ -185,7 +211,7 @@ Build / Host tests / Device tests / Unverified。
 
 - `guachat-develop`：需求 → 实现 → 验证 → 报告
 - `guachat-setup`：安装 PlatformIO / Python / 工具链
-- `guachat-build`：构建、资源预算、合并固件
+- `guachat-build`：构建、资源预算、合并/校验固件、发布归档
 - `guachat-device-test`：确认后烧录、串口采集、设备清单
 - `guachat-debug`：启动循环、花屏、I2C、SD、射频排障
 

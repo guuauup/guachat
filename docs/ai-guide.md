@@ -50,7 +50,7 @@ python tools/install_skills.py          # Claude Code：加载 skills/
 
 推荐顺序：
 
-1. 在 `src/main.cpp` 保留初始化骨架（Serial → TCA9535 → display → LVGL → input → UI → 背光 → 任务）。
+1. 在 `src/main.cpp` 保留初始化骨架（Serial → TCA9535 → buttons → display → LVGL → input → UI → 背光 → 任务）。
 2. 保留 `hw_init_task` 里的开机反馈：`bsp_haptic_init()` +
    `bsp_haptic_boot_feedback()`，以及 `loop()` 里的 `bsp_haptic_tick()`。
    本机没有电源指示灯，一次震动用于告诉用户固件已经启动；除非提供等效提示，
@@ -58,6 +58,8 @@ python tools/install_skills.py          # Claude Code：加载 skills/
    新界面的按钮/滑块触控反馈调用 `bsp_haptic_key_click()`；
    重新校准 `bsp_haptic_recalibrate()` 阻塞 1–3 秒，只能放后台任务。
 3. 把 `src/dev/dev_ui.cpp` 整体替换成新界面；不要保留页签布局后只换文字。
+   三个可编程实体按键（BOOT/锁屏、音量加、音量减）用
+   `bsp_buttons.h` 读取，可实现翻页、快捷键、组合键等；开关机键不可编程。
 4. 需要新外设时，先看 `src/bsp/*.h` 和 `docs/bsp-api.md`；确需新驱动时放在 `src/` 下并走 BSP 封装。
 5. 所有 LVGL 操作留在 `ui_task`；后台任务通过队列/快照交给 UI。
 6. 中文界面：优先用 `src/fonts/fonts.h` 里的 `ui_font_syhtm18`，设置

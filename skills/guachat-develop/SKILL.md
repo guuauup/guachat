@@ -41,6 +41,9 @@ or any firmware change on this board.
    - Call `bsp_haptic_key_click()` from button/slider/roller/switch events for
      low-voltage touch feedback. Use `bsp_haptic_get/set_alert_*()` and
      `bsp_haptic_get/set_key_feedback()` for persisted user settings.
+   - Read the three programmable physical keys (BOOT/lock GPIO0, volume up P01,
+     volume down P00) through `bsp_buttons.h`; the power key is hardware-only
+     and cannot be read by the firmware.
    - `bsp_haptic_recalibrate()` blocks 1–3 s; call it from a background task,
      never from an LVGL callback.
    - Replace `src/dev/dev_ui.cpp` with your own screen.

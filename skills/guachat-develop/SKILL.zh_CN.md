@@ -38,6 +38,8 @@ description: 使用 BSP 为 GUACHAT 2G4 开发新应用或界面。用户提出�
      强度设为 0 时会同时关闭提醒和开机震动。
    - 按钮/滑块/roller/开关的事件回调里调用 `bsp_haptic_key_click()` 做低压触控反馈；
      用户设置用 `bsp_haptic_get/set_alert_*()` 和 `bsp_haptic_get/set_key_feedback()`。
+   - 三个可编程实体按键（BOOT/锁屏 GPIO0、音量加 P01、音量减 P00）用
+     `bsp_buttons.h` 读取，可做翻页、快捷键、组合键；开关机键纯硬件完成，不可读。
    - `bsp_haptic_recalibrate()` 阻塞 1–3 秒，只能放后台任务，不要在 LVGL 回调里调用。
    - 用新界面整体替换 `src/dev/dev_ui.cpp`。
    - 所有 `lv_*` 调用留在 `ui_task` 或 LVGL 回调里。

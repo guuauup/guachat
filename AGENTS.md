@@ -193,12 +193,16 @@ bsp_haptic_boot_feedback();   // DRV2605L LRA，Strong Click 100%
 | 音频 | I2S0 全双工，默认 8 kHz / 32 bit / 立体声（可运行时改采样率）；BCLK 38、LRC 39、DIN 40、DOUT 41、SD_MODE 42 |
 | LoRa | E28-2G4M20S / SX1280，SPI3；MISO 4、MOSI 5、SCK 6、NSS 7、DIO1 8、RXEN 15、TXEN 16、NRESET 17、BUSY 18 |
 | GPS | MAX-M10S，UART0，TX 43 / RX 44，230400 |
-| 按键 | BOOT GPIO0（低有效） |
+| 按键 | **可编程**：BOOT/锁屏 GPIO0、音量加 TCA9535 P01、音量减 TCA9535 P00（均低有效）；开关机键为纯硬件电源锁存，S3 不可读 |
 | 电池 | 单节 18650，4.4 V / 5200 mAh（开源硬件）；MAX17055 电量计；建议低于 3.40 V 自动关机（基线 3.3 V），关机后 HT7125S 可给 GPS + RTC 备用 >30 天 |
 | 触觉 | DRV2605L，I2C0 0x5A，X 轴 LRA，Library 6；开机默认震动一次（Strong Click 100%） |
 
 完整引脚与电源树见 [`docs/hardware/硬件连接说明.md`](docs/hardware/硬件连接说明.md)
 和 [`docs/hardware/电源树.md`](docs/hardware/电源树.md)。
+
+> 三个可编程实体按键用 [`src/bsp/bsp_buttons.h`](src/bsp/bsp_buttons.h) 读取：
+> BOOT/锁屏（GPIO0）、音量加（P01）、音量减（P00）。不要直接读 GPIO 或操作
+> TCA9535。开关机键不经过 S3，固件不能读取，也不能用它做应用输入。
 
 **实测注意**：个别板子上 QMC5883P 可能无应答（I2C0 扫描不到 0x2C）。
 BSP 会以 `mag_ok=false` 降级，这不一定是驱动 bug；先确认硬件，再改代码。

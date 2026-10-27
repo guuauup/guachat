@@ -14,6 +14,7 @@
 
 ```cpp
 TCA9535Manager::getInstance()->begin();   // I2C0 总线 + IO 扩展器
+bsp_buttons_init();                       // 实体按键：BOOT / 音量加 / 音量减
 bsp_display_init();                       // 屏幕硬件，LVGL 之前
 lv_init();
 bsp_display_lvgl_init();                  // LVGL 显示驱动
@@ -32,6 +33,7 @@ bsp_audio_init();
 ```
 
 - `bsp_display_lvgl_init()` / `bsp_input_init()` 必须在 `lv_init()` 之后。
+- `bsp_buttons_init()` 只配置 GPIO0；音量键读取依赖 `TCA9535Manager::begin()` 已完成。
 - `bsp_power_init()` / `bsp_sensors_init()` / `bsp_haptic_init()` 依赖 I2C0 已初始化。
 - 所有 `bsp_*_init()` 都允许失败，应用必须能降级运行。
 - 开机震动是硬件提示，不是应用功能；见第 9 节。
@@ -65,7 +67,9 @@ void bsp_backlight_on(bool on);
 
 ---
 
-## 2. `bsp_input.h` — 触摸
+## 2. `bsp_input.h` / `bsp_buttons.h` — 触摸与实体按键
+
+### 2.1 触摸
 
 ```c
 void     bsp_input_init(void);
@@ -76,6 +80,52 @@ uint32_t bsp_touch_last_activity_ms(void);
 - FT6336U，I2C1（47/48，400 kHz），INT 45，RST 由 TCA9535 P15。
 - `bsp_input_init()` 注册 LVGL 指针设备；之后触摸事件由 `lv_timer_handler()` 派发。
 - 需要“无操作息屏”时，用 `bsp_touch_last_activity_ms()` 与 `millis()` 比较。
+
+### 2.2 实体按键
+
+```c
+typedef enum {
+    BSP_BUTTON_BOOT = 0,   // 锁屏键，GPIO0
+    BSP_BUTTON_VOL_UP,     // 音量加，TCA9535 P01
+    BSP_BUTTON_VOL_DOWN,   // 音量减，TCA9535 P00
+    BSP_BUTTON_COUNT
+} bsp_button_t;
+
+typedef struct {
+    bool boot;          // 总是有效
+    bool vol_up;        // vol_valid 为 true 时有效
+    bool vol_down;      // vol_valid 为 true 时有效
+    bool vol_valid;     // 本次是否成功读到音量键
+} bsp_buttons_state_t;
+
+void bsp_buttons_init(void);
+bool bsp_buttons_read(bsp_buttons_state_t *out);
+bool bsp_button_pressed(bsp_button_t button);
+```
+
+- 三个可编程按键**均低有效**：BOOT/锁屏 GPIO0（内部上拉）、音量加
+  TCA9535 P01、音量减 TCA9535 P00（外部上拉）。
+- **开关机键不可编程**：它是纯硬件电源锁存，不经过 S3，固件不能读取，
+  也不能用它做应用输入。
+- `bsp_buttons_read()` 一次返回三键快照。音量键走 I2C0，总线忙时
+  `vol_valid=false`，此时 `vol_up` / `vol_down` 无效；`boot` 仍然有效。
+  应用应容忍偶发丢样，并自行消抖（建议 20–50 ms 轮询一次）。
+- `bsp_button_pressed()` 适合单次查询；周期轮询优先用
+  `bsp_buttons_read()`，避免重复 I2C 事务。
+- 需要按键触觉反馈时，在确认按下的边沿调用 `bsp_haptic_key_click()`；
+  是否启用由用户的“触控反馈”设置决定。
+- 示例：
+
+```c
+bsp_buttons_state_t now;
+bool vol_ok = bsp_buttons_read(&now);
+if (now.boot) {
+    // 锁屏键按下
+}
+if (vol_ok && now.vol_up) {
+    // 音量加按下
+}
+```
 
 ---
 
@@ -397,6 +447,7 @@ bool bsp_i2c_read_reg(uint8_t addr, uint8_t reg, uint8_t *value);
 #include <Arduino.h>
 #include <lvgl.h>
 
+#include "bsp/bsp_buttons.h"
 #include "bsp/bsp_display.h"
 #include "bsp/bsp_input.h"
 #include "bsp/bsp_pins.h"
@@ -427,6 +478,7 @@ void setup()
     Serial.begin(115200);
 
     TCA9535Manager::getInstance()->begin();
+    bsp_buttons_init();
     bsp_display_init();
     lv_init();
     bsp_display_lvgl_init();

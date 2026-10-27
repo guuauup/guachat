@@ -12,6 +12,7 @@
 #include <lvgl.h>
 
 #include "bsp/bsp_audio.h"
+#include "bsp/bsp_buttons.h"
 #include "bsp/bsp_display.h"
 #include "bsp/bsp_gps.h"
 #include "bsp/bsp_haptic.h"
@@ -77,6 +78,8 @@ void setup()
     if (!TCA9535Manager::getInstance()->begin()) {
         Serial.println("[BSP] WARN: TCA9535 not found; display/touch reset may fail");
     }
+
+    bsp_buttons_init();   /* 三个可编程按键：BOOT + 音量加/减 */
 
     bsp_display_init();
 

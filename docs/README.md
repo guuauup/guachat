@@ -30,6 +30,7 @@
 | [`architecture.md`](architecture.md) | 权威 | 构建环境、启动顺序、任务模型、内存布局、数据流 |
 | [`bsp-api.md`](bsp-api.md) | 权威 | 每个 BSP 模块的 API、线程约束、示例 |
 | [`concurrency.md`](concurrency.md) | 权威 | LVGL 单任务模型、任务优先级、I2C/SD 互斥 |
+| [`task-layout-reference.md`](task-layout-reference.md) | 参考 | 完整产品的任务/优先级/栈分配案例与风险边界 |
 | [`build-and-flash.md`](build-and-flash.md) | 权威 | 装环境、构建、合并/校验 0x0 固件、发布归档、CI、烧录、恢复 |
 | [`testing.md`](testing.md) | 权威 | 静态检查、主机测试、镜像/归档校验、设备测试清单、报告格式 |
 | [`fonts.md`](fonts.md) | 权威 | 中文字库、子集生成、覆盖检查 |
@@ -57,6 +58,6 @@
 | 点灯/读传感器 | `bsp-api.md` → `src/bsp/bsp_sensors.h` |
 | 做新界面 | `bsp-api.md`（display/input）→ `fonts.md` → `concurrency.md` |
 | LoRa 收发 | `bsp-api.md`（radio）→ `hardware/射频与合规.md` |
-| 加任务/定时器 | `concurrency.md` |
+| 加任务/定时器 | `concurrency.md` → `task-layout-reference.md` |
 | 编译过了但开机崩 | `troubleshooting.md` → `testing.md` |
 | 准备交付 | `testing.md` → `build-and-flash.md`（合并/校验/归档） → `release.md` |
